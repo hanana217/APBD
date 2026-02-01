@@ -5,7 +5,7 @@ import random
 
 DB_CONFIG = {
     'host': '127.0.0.1',
-    'port': 3307,          # 🔴 LIGNE MANQUANTE
+    'port': 3308,         
     'user': 'apbd_user',
     'password': 'apbd_pass',
     'database': 'pos'
@@ -13,7 +13,7 @@ DB_CONFIG = {
 
 
 LOG_FILES = [
-    'C:/xampp/mysql/data/Hanana-slow.log'
+    '..\docker\mysql\logs\slow.log'
 ]
 
 
