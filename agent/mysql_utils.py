@@ -1,10 +1,56 @@
+# mysql_utils.py - Version CORRIGÉE
 import mysql.connector
 import time
-from config import MYSQL_CONFIG
+import sys
+import os
+
+# Détermine le chemin du projet
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+docker_config_path = os.path.join(project_root, 'docker', 'rl_agent', 'config_docker.py')
+
+# Import automatique selon le mode
+try:
+    # Essaie d'abord d'importer config_docker depuis le dossier Docker
+    import importlib.util
+    
+    if os.path.exists(docker_config_path):
+        spec = importlib.util.spec_from_file_location("config_docker", docker_config_path)
+        config_docker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(config_docker)
+        MYSQL_CONFIG = config_docker.MYSQL_CONFIG
+        print("🔗 Mode DOCKER activé (fichier trouvé)")
+    else:
+        raise ImportError("Fichier Docker non trouvé")
+        
+except ImportError:
+    # Sinon, mode local
+    try:
+        from config import MYSQL_CONFIG
+        print("💻 Mode LOCAL activé (config.py)")
+    except ImportError:
+        # Fallback: configuration par défaut
+        print("⚠  Aucun config trouvé, utilisation des valeurs par défaut")
+        MYSQL_CONFIG = {
+            'host': 'localhost',
+            'port': 3308,
+            'user': 'apbd_user',
+            'password': 'apbd_pass',
+            'database': 'pos',
+            'autocommit': True
+        }
 
 def get_connection():
-    return mysql.connector.connect(**MYSQL_CONFIG)
-
+    """Get MySQL connection with better error handling"""
+    try:
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
+        print(f"✅ Connecté à MySQL sur {MYSQL_CONFIG['host']}:{MYSQL_CONFIG['port']}")
+        return conn
+    except mysql.connector.Error as err:
+        print(f"❌ ERREUR connexion MySQL: {err}")
+        print(f"   Vérifie que Docker est lancé: docker compose up")
+        print(f"   Configuration utilisée: {MYSQL_CONFIG}")
+        sys.exit(1)
+        
 def fetch_all_results(cursor):
     """Helper function to fetch all results and clear the buffer"""
     try:
