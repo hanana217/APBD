@@ -9,39 +9,57 @@ services:
       - --long_query_time=1
       - --performance_schema=ON
       - --log_output=FILE
+      - --max_connections=1000
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: pos
       MYSQL_USER: apbd_user
       MYSQL_PASSWORD: apbd_pass
     ports:
-      - "3308:3306"
+      - "3308:3306"  # Externally accessible for debugging
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
       - ./mysql/logs:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  app:
-    image: python:3.10
-    container_name: rl_app
+  rl_agent:
+    build: ../agent
+    container_name: rl_agent
     depends_on:
       mysql:
         condition: service_healthy
     working_dir: /app
     volumes:
-      - ./app:/app
-    command: tail -f /dev/null
+      - ./rl_agent:/app
+      - ./data/models:/app/models
     environment:
-      MYSQL_HOST: mysql
+      MYSQL_HOST: mysql  # Changed from localhost to mysql
       MYSQL_PORT: 3306
-      MYSQL_DB: pos
       MYSQL_USER: apbd_user
       MYSQL_PASSWORD: apbd_pass
+      MYSQL_DATABASE: pos
+    command: python agent_api.py  # Start API server
+    ports:
+      - "8000:8000"  # API port
+
+  # interface:
+  #   build: ./interface
+  #   container_name: interface
+  #   depends_on:
+  #     - rl_agent
+  #   working_dir: /app
+  #   volumes:
+  #     - ./interface:/app
+  #   environment:
+  #     AGENT_API_URL: http://rl_agent:8000
+  #   ports:
+  #     - "8501:8501"  # Streamlit interface
+  #   command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
 
   grafana:
     image: grafana/grafana:latest
@@ -50,6 +68,8 @@ services:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
 
   prometheus:
     image: prom/prometheus
