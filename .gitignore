@@ -11,8 +11,8 @@ __pycache__/
 .venv/
 
 # Data exports
-data/exports/
-
+#data/exports/
+data/exports/*.csv
 # OS
 Thumbs.db
 .DS_Store
