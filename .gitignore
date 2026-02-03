@@ -13,6 +13,8 @@ __pycache__/
 # Data exports
 #data/exports/
 data/exports/*.csv
+
+agent/
 # OS
 Thumbs.db
 .DS_Store
