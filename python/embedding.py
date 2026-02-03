@@ -25,46 +25,49 @@ conn.close()
 print("Dataset brut:", df.shape)
 
 # ===============================
-# FEATURES
+# NETTOYAGE
 # ===============================
-numerical_features = [
-    'num_joins', 'num_where', 'has_order_by', 'has_group_by',
-    'query_length', 'rows_examined', 'using_filesort',
-    'using_temporary', 'index_count',
-    'buffer_pool_hit_ratio', 'connections_count',
-    'hour_of_day', 'day_of_week'
-]
+# Garder toutes les colonnes sauf sql_text et explain_text pour le moment
+df_original = df.copy()
+df = df.dropna(subset=['is_slow', 'sql_text'])
 
-categorical_features = ['access_type']
+# Remplir les valeurs manquantes
+numerical_cols = ['num_joins', 'num_where', 'has_order_by', 'has_group_by',
+                  'query_length', 'rows_examined', 'using_filesort',
+                  'using_temporary', 'cpu_usage', 'buffer_pool_hit_ratio',
+                  'connections_count', 'hour_of_day', 'day_of_week',
+                  'execution_time', 'index_count']
 
-target_classification = 'is_slow'
-target_regression = 'execution_time'
+categorical_cols = ['access_type', 'key_used']
+
+for col in numerical_cols:
+    if col in df.columns:
+        df[col] = df[col].fillna(0)
+        
+for col in categorical_cols:
+    if col in df.columns:
+        df[col] = df[col].fillna("UNKNOWN")
 
 # ===============================
-# CLEANING
-# ===============================
-df = df.dropna(subset=[target_classification, 'sql_text'])
-
-df[numerical_features] = df[numerical_features].fillna(0)
-df[categorical_features] = df[categorical_features].fillna("UNKNOWN")
-
-# ===============================
-# LABEL ENCODING (categorical)
+# ENCODAGE CATÉGORIEL
 # ===============================
 label_encoders = {}
-for col in categorical_features:
-    le = LabelEncoder()
-    df[col] = le.fit_transform(df[col])
-    label_encoders[col] = le
+for col in categorical_cols:
+    if col in df.columns:
+        le = LabelEncoder()
+        df[col] = le.fit_transform(df[col].astype(str))
+        label_encoders[col] = le
 
 # ===============================
-# SQL TEXT EMBEDDING
+# GÉNÉRATION DES EMBEDDINGS SQL
 # ===============================
 print("⏳ Génération des embeddings SQL...")
 
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
-sql_texts = df['sql_text'].astype(str).tolist()
+df['sql_text'] = df['sql_text'].fillna("").astype(str)
+sql_texts = df['sql_text'].tolist()
+
 sql_embeddings = model.encode(
     sql_texts,
     batch_size=32,
@@ -72,31 +75,27 @@ sql_embeddings = model.encode(
 )
 
 sql_embeddings = np.array(sql_embeddings)
-print("Embeddings SQL shape:", sql_embeddings.shape)  # (N, 384)
+print(f"✅ Embeddings SQL shape: {sql_embeddings.shape}")
 
 # ===============================
-# DATASET FINAL
+# CRÉATION DU DATASET COMPLET
 # ===============================
-X_numeric = df[numerical_features + categorical_features].values
+# Créer un DataFrame avec toutes les features
+df_all_features = df.copy()
 
-X_final = np.hstack([X_numeric, sql_embeddings])
+# Ajouter les embeddings comme nouvelles colonnes
+for i in range(sql_embeddings.shape[1]):
+    df_all_features[f'sql_emb_{i}'] = sql_embeddings[:, i]
 
-# Create column names
-embedding_cols = [f"sql_emb_{i}" for i in range(sql_embeddings.shape[1])]
-final_columns = (
-    numerical_features +
-    categorical_features +
-    embedding_cols
-)
-
-df_final = pd.DataFrame(X_final, columns=final_columns)
-
-df_final[target_classification] = df[target_classification].values
-df_final[target_regression] = df[target_regression].values
+# Sauvegarder aussi les textes SQL et explain pour référence
+df_all_features['sql_text_original'] = df_original['sql_text']
+df_all_features['explain_text'] = df_original['explain_text']
 
 # ===============================
-# SAVE
+# SAUVEGARDE
 # ===============================
-df_final.to_csv("../data/exports/dataset_sql_embedding_ready.csv", index=False)
+df_all_features.to_csv("../data/exports/dataset_with_embeddings.csv", index=False)
 
-print("✅ Dataset Embedding SQL prêt :", df_final.shape)
+print("✅ Dataset complet avec embeddings prêt :", df_all_features.shape)
+print(f"📊 Fichier sauvegardé : ../data/exports/dataset_with_embeddings.csv")
+print(f"📋 Colonnes : {df_all_features.columns.tolist()}")
