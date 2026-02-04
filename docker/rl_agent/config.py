@@ -1,3 +1,4 @@
+# docker/rl_agent/config_docker.py - Pour Docker SEULEMENT
 import os
 
 MYSQL_CONFIG = {
