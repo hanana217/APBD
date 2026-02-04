@@ -1,191 +1,199 @@
-# agent_api.py - FastAPI server for your agent
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import uvicorn
-import json
-import asyncio
+# flask_api.py - API Flask pour ton agent
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 from deployment import IndexOptimizationAgent
-from mysql_utils import get_connection
-import mysql.connector
+import time
+import sys
+import os
 
-app = FastAPI(title="RL Agent API", description="API for MySQL Index Optimization Agent")
+# Configure pour éviter les warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# CORS middleware for interface
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = Flask(__name__)
+CORS(app)  # Autorise toutes les origines (pour l'interface)
 
-# Initialize agent
-agent = None
+print("=" * 60)
+print("🤖 AGENT RL API - FLASK VERSION")
+print("=" * 60)
 
-class OptimizationRequest(BaseModel):
-    steps: int = 5
-    strategy: str = "balanced"
+# Initialise l'agent
+try:
+    agent = IndexOptimizationAgent()
+    print("✅ Agent RL initialisé")
+except Exception as e:
+    print(f"⚠  Erreur initialisation agent: {e}")
+    agent = None
 
-class ChatRequest(BaseModel):
-    message: str
-    user_id: str = "interface_user"
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize agent on startup"""
-    global agent
-    print("🚀 Starting RL Agent API...")
-    
-    # Test database connection
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1")
-        cursor.fetchall()
-        cursor.close()
-        conn.close()
-        print("✅ Database connection successful")
-    except Exception as e:
-        print(f"❌ Database connection failed: {e}")
-    
-    # Load agent
-    try:
-        agent = IndexOptimizationAgent()
-        print("✅ RL Agent loaded successfully")
-    except Exception as e:
-        print(f"⚠  Agent loading warning: {e}")
-        agent = None
-
-@app.get("/")
-async def root():
-    return {
-        "service": "RL Agent API",
+@app.route('/')
+def home():
+    return jsonify({
+        "service": "Agent RL d'optimisation MySQL",
         "version": "1.0",
+        "author": "APBD Team",
         "endpoints": {
-            "/health": "Health check",
-            "/api/status": "Get database status",
-            "/api/optimize": "Run optimization",
-            "/api/chat": "Chat with agent"
+            "/health": "État du service",
+            "/api/status": "État de la base",
+            "/api/optimize": "Lancer l'optimisation",
+            "/api/recommendations": "Recommandations",
+            "/api/chat": "Chat avec l'agent"
         }
-    }
+    })
 
-@app.get("/health")
-async def health():
-    """Health check endpoint"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1")
-        cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        return {
-            "status": "healthy",
-            "database": "connected",
-            "agent": "loaded" if agent else "not_loaded"
-        }
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
+@app.route('/health', methods=['GET'])
+def health():
+    """Vérifie que tout fonctionne"""
+    return jsonify({
+        "status": "healthy",
+        "timestamp": time.time(),
+        "agent": "loaded" if agent and hasattr(agent, 'model_loaded') and agent.model_loaded else "simulation",
+        "message": "🤖 Agent RL prêt à optimiser !"
+    })
 
-@app.get("/api/status")
-async def get_status():
-    """Get current database status"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Get query performance
-        from mysql_utils import measure_query_performance
-        perf = measure_query_performance(cursor)
-        
-        # Get index count
-        cursor.execute("""
-            SELECT COUNT(*) 
-            FROM information_schema.statistics 
-            WHERE table_schema = DATABASE() 
-            AND table_name = 'orders'
-            AND index_name LIKE 'idx_orders_%'
-        """)
-        index_count = cursor.fetchone()[0]
-        
-        cursor.close()
-        conn.close()
-        
-        return {
-            "status": "success",
-            "data": {
-                "performance": round(perf, 4),
-                "index_count": index_count,
-                "max_indexes": 5,
-                "database": "pos"
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/optimize")
-async def optimize(request: OptimizationRequest):
-    """Run optimization with RL agent"""
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """État actuel de la base de données"""
     if not agent:
-        raise HTTPException(status_code=503, detail="Agent not loaded")
+        return jsonify({
+            "success": False,
+            "error": "Agent non initialisé"
+        }), 500
     
     try:
-        # Run optimization
-        indexes, query_time = agent.optimize(steps=request.steps)
+        status = agent.get_status()
+        return jsonify({
+            "success": True,
+            "data": status,
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
+
+@app.route('/api/optimize', methods=['POST'])
+def optimize():
+    """Exécute l'optimisation RL"""
+    if not agent:
+        return jsonify({
+            "success": False,
+            "error": "Agent non initialisé"
+        }), 500
+    
+    try:
+        data = request.get_json(silent=True) or {}
+        steps = data.get('steps', 5)
+        strategy = data.get('strategy', 'balanced')
+        
+        print(f"🔄 Optimisation demandée: {steps} étapes")
+        
+        result = agent.optimize(steps=steps)
+        
+        return jsonify({
+            "success": True,
+            "data": result,
+            "message": "Optimisation terminée avec succès",
+            "timestamp": time.time()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
+
+@app.route('/api/recommendations', methods=['GET'])
+def get_recommendations():
+    """Recommandations d'index"""
+    if not agent:
+        return jsonify({
+            "success": False,
+            "error": "Agent non initialisé"
+        }), 500
+    
+    try:
         recommendations = agent.get_recommendations()
         
-        return {
-            "status": "success",
-            "data": {
-                "steps": request.steps,
-                "index_count": indexes,
-                "query_time": round(query_time, 4),
-                "recommendations": recommendations,
-                "message": f"Optimization complete. Current indexes: {indexes}/5"
-            }
-        }
+        return jsonify({
+            "success": True,
+            "data": recommendations,
+            "message": "Recommandations générées",
+            "timestamp": time.time()
+        })
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
 
-@app.post("/api/chat")
-async def chat(request: ChatRequest):
-    """Chat interface with agent"""
-    # Simple rule-based responses for now
-    # Your friend can enhance this with LangChain
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    """Interface de chat avec l'agent"""
+    if not agent:
+        return jsonify({
+            "success": False,
+            "error": "Agent non initialisé"
+        }), 500
     
-    message_lower = request.message.lower()
-    
-    if any(word in message_lower for word in ['slow', 'performance', 'lent', 'rapide']):
-        response = "I can help optimize your database performance. Would you like me to run an optimization? Use the /api/optimize endpoint or click 'Optimize Now' in the interface."
-    
-    elif any(word in message_lower for word in ['index', 'indexes', 'indexation']):
-        response = "I manage database indexes using Reinforcement Learning. I can create or drop indexes based on query patterns. Current max indexes: 5."
-    
-    elif any(word in message_lower for word in ['hello', 'hi', 'bonjour', 'help']):
-        response = "Hello! I'm your RL-powered database optimization assistant. I can help optimize MySQL indexes, diagnose performance issues, and provide recommendations."
-    
-    else:
-        response = "I'm focused on database optimization. You can ask me about performance issues, index management, or request optimizations."
-    
-    return {
-        "status": "success",
-        "data": {
-            "message": request.message,
-            "response": response,
-            "suggested_actions": ["optimize", "diagnose", "status"]
-        }
-    }
+    try:
+        data = request.get_json(silent=True) or {}
+        message = data.get('message', '').lower()
+        user_id = data.get('user_id', 'interface_user')
+        
+        # Réponses basées sur les mots-clés
+        if any(word in message for word in ['slow', 'lent', 'performance', 'rapid']):
+            response = "Je peux optimiser les performances de votre base MySQL. Voulez-vous que je lance une optimisation automatique des index ?"
+            actions = ["optimize"]
+            
+        elif any(word in message for word in ['index', 'indexes', 'indexation']):
+            current_idx = agent.current_indexes if hasattr(agent, 'current_indexes') else 2
+            response = f"Je gère les index avec l'apprentissage par renforcement. Je peux créer ou supprimer des index intelligemment. Actuellement, vous avez {current_idx}/5 index."
+            actions = ["status", "recommendations"]
+            
+        elif any(word in message for word in ['hello', 'bonjour', 'hi', 'salut']):
+            response = "Bonjour ! Je suis votre assistant RL pour l'optimisation de bases MySQL. Je peux optimiser vos index, diagnostiquer les problèmes et vous donner des recommandations."
+            actions = ["help"]
+            
+        elif any(word in message for word in ['help', 'aide', 'que faire']):
+            response = "Je peux :\n1. Optimiser automatiquement vos index\n2. Analyser les performances\n3. Donner des recommandations\n4. Dialoguer sur l'optimisation MySQL\nDites-moi ce que vous voulez faire !"
+            actions = ["optimize", "status", "recommendations"]
+            
+        else:
+            response = "Je suis spécialisé dans l'optimisation MySQL avec RL. Posez-moi des questions sur les performances, les index, ou demandez-moi d'optimiser votre base."
+            actions = []
+        
+        return jsonify({
+            "success": True,
+            "data": {
+                "query": data.get('message', ''),
+                "response": response,
+                "suggested_actions": actions
+            },
+            "timestamp": time.time()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "timestamp": time.time()
+        }), 500
 
-if __name__ == "__main__":
-    uvicorn.run(
-        "agent_api:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
+if __name__ == '__main__':
+    print("\n📡 Endpoints disponibles:")
+    print("  - http://localhost:5000/")
+    print("  - http://localhost:5000/health")
+    print("  - http://localhost:5000/api/status")
+    print("  - http://localhost:5000/api/optimize")
+    print("  - http://localhost:5000/api/recommendations")
+    print("  - http://localhost:5000/api/chat")
+    
+    print("\n🤝 Pour l'interface de ton amie:")
+    print("  Elle pourra appeler ces endpoints depuis son interface Streamlit")
+    print("=" * 60)
+    
+    app.run(host='0.0.0.0', port=5000, debug=True)

@@ -1,4 +1,5 @@
-FROM python:3.10-slim
+FROM python:3.10
+
 
 WORKDIR /app
 
@@ -10,7 +11,9 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip setuptools wheel \
+ && pip install --prefer-binary --default-timeout=200 -r requirements.txt
+
 
 # Copy agent code
 COPY . .
