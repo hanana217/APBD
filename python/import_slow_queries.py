@@ -17,7 +17,7 @@ LOG_FILES = [
 ]
 
 
-SLOW_THRESHOLD = 1.0
+SLOW_THRESHOLD = 0.5
 
 def generate_fast_queries(cursor, limit=250, max_attempts=4000):
     """
@@ -432,7 +432,7 @@ def main():
         # ============================================
     # AJOUT DES REQUÊTES RAPIDES (FAST)
     # ============================================
-    print("\nAjout des requêtes FAST (< 1s)...")
+    print("\nAjout des requêtes FAST (< 0.5s)...")
 
     fast_queries = generate_fast_queries(cursor_fast, limit=250)
     fast_inserted = 0

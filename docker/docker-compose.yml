@@ -6,7 +6,7 @@ services:
     command:
       - --slow_query_log=1
       - --slow_query_log_file=/var/lib/mysql/slow.log
-      - --long_query_time=1
+      - --long_query_time=0.5
       - --performance_schema=ON
       - --log_output=FILE
       - --max_connections=1000
