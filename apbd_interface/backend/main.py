@@ -9,6 +9,12 @@ import os
 # Ajouter le dossier courant au path Python
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# ... au début du fichier (après les imports existants) ...
+
+# ==================== REMPLACER CE BLOC ====================
+# Ajouter le dossier courant au path Python
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 # Maintenant importer depuis agent
 try:
     from agent.langchain_agent import sadop_agent
@@ -17,7 +23,109 @@ except ImportError as e:
     print(f"⚠️ Agent LangChain non disponible: {e}")
     sadop_agent = None
 
+# ==================== PAR CE CODE ====================
+
+# Ajouter le chemin du dossier agent indépendant
+current_dir = os.path.dirname(os.path.abspath(__file__))  # backend/
+project_root = os.path.dirname(os.path.dirname(current_dir))  # apbd_interface/
+agent_dir = os.path.join(project_root, "agent")  # apbd_interface/agent
+
+if os.path.exists(agent_dir):
+    sys.path.insert(0, agent_dir)  # Ajouter en première position
+    print(f"✅ Dossier agent trouvé: {agent_dir}")
+else:
+    print(f"❌ Dossier agent introuvable: {agent_dir}")
+    agent_dir = None
+
+# Essayer d'importer l'agent LangChain
+try:
+    if agent_dir:
+        # Option 1: Importer depuis le dossier agent
+        from langchain_agent import sadop_agent
+        print("✅ Agent LangChain chargé depuis dossier indépendant")
+    else:
+        raise ImportError("Dossier agent non trouvé")
+        
+except ImportError as e:
+    print(f"⚠️ Agent LangChain non disponible: {e}")
+    
+    # ==================== CODE LANGCHAIN DIRECTEMENT DANS MAIN.PY ====================
+    # Créer un agent simple directement
+    import asyncio
+    
+    class SimpleSADOPAgent:
+        """Agent simple intégré directement dans main.py"""
+        
+        def __init__(self):
+            print("✅ Agent simple initialisé (intégré dans main.py)")
+        
+        async def query(self, user_input: str):
+            """Analyse une requête SQL"""
+            sql_upper = user_input.upper()
+            
+            # Détecter si c'est une requête SQL
+            sql_keywords = ["SELECT", "INSERT", "UPDATE", "DELETE", "FROM ", "WHERE "]
+            if not any(k in sql_upper for k in sql_keywords):
+                return "❓ Veuillez fournir une requête SQL valide à analyser."
+            
+            # Analyse simple
+            issues = []
+            suggestions = []
+            
+            if "SELECT *" in sql_upper:
+                issues.append("Utilise `SELECT *` (récupère toutes les colonnes)")
+                suggestions.append("Spécifiez uniquement les colonnes nécessaires")
+            
+            if "WHERE" not in sql_upper and "LIMIT" not in sql_upper:
+                issues.append("Pas de clause WHERE ou LIMIT")
+                suggestions.append("Ajoutez une clause WHERE pour filtrer les résultats")
+            
+            if "JOIN" in sql_upper:
+                issues.append("Contient des jointures")
+                suggestions.append("Vérifiez que les colonnes de jointure sont indexées")
+            
+            # Construire la réponse
+            response = [
+                "## 🔍 Analyse SQL SADOP",
+                "",
+                "### 📝 Requête analysée",
+                "```sql",
+                user_input,
+                "```",
+                ""
+            ]
+            
+            if issues:
+                response.append("### ⚠️ Problèmes détectés")
+                for issue in issues:
+                    response.append(f"- {issue}")
+                response.append("")
+            
+            response.append("### 💡 Recommandations")
+            for suggestion in suggestions:
+                response.append(f"- {suggestion}")
+            
+            # Ajouter des conseils généraux
+            response.append("")
+            response.append("### 🔧 Conseils d'optimisation")
+            response.append("1. **Utilisez EXPLAIN** pour voir le plan d'exécution :")
+            response.append(f"   ```sql")
+            response.append(f"   EXPLAIN {user_input}")
+            response.append(f"   ```")
+            response.append("2. **Ajoutez des index** sur les colonnes filtrées")
+            response.append("3. **Évitez SELECT *** - spécifiez les colonnes")
+            
+            return "\n".join(response)
+    
+    # Créer une instance de l'agent intégré
+    sadop_agent = SimpleSADOPAgent()
+    print("✅ Agent simple créé (intégré dans main.py)")
+    
+    # ==================== FIN DU CODE LANGCHAIN ====================
+
+# ==================== CONTINUER AVEC LE RESTE DU FICHIER ====================
 app = FastAPI(title="SADOP API", version="2.0")
+
 
 # Autoriser Streamlit
 app.add_middleware(
