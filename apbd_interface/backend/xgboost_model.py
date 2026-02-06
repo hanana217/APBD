@@ -502,9 +502,6 @@ def quick_test_sql(sql_query, model_path='query_performance_classifier.pkl'):
 if __name__ == "__main__":
     main()
 
-
-
-
     # To quickly test a single query without training:
     # query = "SELECT * FROM users WHERE age > 30 ORDER BY created_at DESC"
     # quick_test_sql(query)
