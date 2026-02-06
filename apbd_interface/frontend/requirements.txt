@@ -1,0 +1,6 @@
+# frontend/requirements.txt - Version compatible Windows
+streamlit==1.28.1
+requests==2.31.0
+pandas==1.5.3  # ← Version plus ancienne mais stable sur Windows
+plotly==5.17.0
+numpy==1.24.3  # Ajouter explicitement
