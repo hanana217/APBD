@@ -26,7 +26,7 @@ def generate_dataset_csv():
     
     # Connexion à la base de données
     conn = mysql.connector.connect(**DB_CONFIG)
-    query = "SELECT * FROM dataset"
+    query = "SELECT * FROM dataset_final"
     df = pd.read_sql(query, conn)
     conn.close()
     
@@ -62,7 +62,7 @@ def generate_dataset_csv():
     df_xgb = df[features].copy()
     
     # Sauvegarde CSV
-    csv_path = os.path.join(EXPORT_DIR, "dataset_xgboost.csv")
+    csv_path = os.path.join(EXPORT_DIR, "dataset_final.csv")
     df_xgb.to_csv(csv_path, index=False)
     
     print(f"✅ Dataset CSV généré: {csv_path}")
