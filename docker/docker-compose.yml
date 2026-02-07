@@ -28,25 +28,25 @@ services:
       timeout: 5s
       retries: 5
 
-  rl_agent:
-    build: ../agent
-    container_name: rl_agent
-    depends_on:
-      mysql:
-        condition: service_healthy
-    working_dir: /app
-    volumes:
-      - ./rl_agent:/app
-      - ./data/models:/app/models
-    environment:
-      MYSQL_HOST: mysql  # Changed from localhost to mysql
-      MYSQL_PORT: 3306
-      MYSQL_USER: apbd_user
-      MYSQL_PASSWORD: apbd_pass
-      MYSQL_DATABASE: pos
-    command: python agent_api.py  # Start API server
-    ports:
-      - "8000:8000"  # API port
+  # rl_agent:
+  #   build: ../agent
+  #   container_name: rl_agent
+  #   depends_on:
+  #     mysql:
+  #       condition: service_healthy
+  #   working_dir: /app
+  #   volumes:
+  #     - ./rl_agent:/app
+  #     - ./data/models:/app/models
+    # environment:
+    #   MYSQL_HOST: mysql  # Changed from localhost to mysql
+    #   MYSQL_PORT: 3306
+    #   MYSQL_USER: apbd_user
+    #   MYSQL_PASSWORD: apbd_pass
+    #   MYSQL_DATABASE: pos
+    # command: python agent_api.py  # Start API server
+    # ports:
+    #   - "8000:8000"  # API port
 
   # interface:
   #   build: ./interface
