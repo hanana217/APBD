@@ -4,12 +4,13 @@ services:
     container_name: apbd_mysql
     restart: always
     command:
-      - --slow_query_log=1
-      - --slow_query_log_file=/var/lib/mysql/slow.log
-      - --long_query_time=0.5
-      - --performance_schema=ON
-      - --log_output=FILE
-      - --max_connections=1000
+    - --slow_query_log=ON
+    - --slow_query_log_file=/var/lib/mysql/slow.log
+    - --long_query_time=0.5
+    - --log_queries_not_using_indexes=ON
+    - --min_examined_row_limit=100
+    - --performance_schema=ON
+    - --log_output=FILE,TABLE
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: pos
