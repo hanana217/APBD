@@ -26,7 +26,7 @@ def generate_dataset_csv():
     
     # Connexion à la base de données
     conn = mysql.connector.connect(**DB_CONFIG)
-    query = "SELECT * FROM dataset_final"
+    query = "SELECT * FROM dataset_final_balanced"
     df = pd.read_sql(query, conn)
     conn.close()
     
