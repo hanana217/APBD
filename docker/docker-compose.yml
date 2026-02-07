@@ -1,80 +1,105 @@
 services:
+  # ==================== BASE DE DONNÉES ====================
   mysql:
     image: mysql:8.0
     container_name: apbd_mysql
     restart: always
     command:
-    - --slow_query_log=ON
-    - --slow_query_log_file=/var/lib/mysql/slow.log
-    - --long_query_time=0.5
-    - --log_queries_not_using_indexes=ON
-    - --min_examined_row_limit=100
-    - --performance_schema=ON
-    - --log_output=FILE,TABLE
+      - --slow_query_log=ON
+      - --slow_query_log_file=/var/lib/mysql/slow.log
+      - --long_query_time=0.5
+      - --log_queries_not_using_indexes=ON
+      - --min_examined_row_limit=100
+      - --performance_schema=ON
+      - --log_output=FILE,TABLE
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: pos
       MYSQL_USER: apbd_user
       MYSQL_PASSWORD: apbd_pass
     ports:
-      - "3308:3306"  # Externally accessible for debugging
+      - "3308:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
-      - ./mysql/logs:/var/lib/mysql
+      - ../sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./mysql/my.ini:/etc/mysql/conf.d/custom.cnf
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 60s
 
-  # rl_agent:
-  #   build: ../agent
-  #   container_name: rl_agent
-  #   depends_on:
-  #     mysql:
-  #       condition: service_healthy
-  #   working_dir: /app
-  #   volumes:
-  #     - ./rl_agent:/app
-  #     - ./data/models:/app/models
-    # environment:
-    #   MYSQL_HOST: mysql  # Changed from localhost to mysql
-    #   MYSQL_PORT: 3306
-    #   MYSQL_USER: apbd_user
-    #   MYSQL_PASSWORD: apbd_pass
-    #   MYSQL_DATABASE: pos
-    # command: python agent_api.py  # Start API server
-    # ports:
-    #   - "8000:8000"  # API port
+  # ==================== BACKEND API (FastAPI) ====================
+  backend:
+    build:
+      context: ../apbd_interface/backend
+      dockerfile: Dockerfile
+    container_name: apbd_backend
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: apbd_user
+      MYSQL_PASSWORD: apbd_pass
+      MYSQL_DATABASE: pos
+    ports:
+      - "8000:8000"
 
-  # interface:
-  #   build: ./interface
-  #   container_name: interface
-  #   depends_on:
-  #     - rl_agent
-  #   working_dir: /app
-  #   volumes:
-  #     - ./interface:/app
-  #   environment:
-  #     AGENT_API_URL: http://rl_agent:8000
-  #   ports:
-  #     - "8501:8501"  # Streamlit interface
-  #   command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+  # ==================== FRONTEND (Streamlit) ====================
+  frontend:
+    build:
+      context: ../apbd_interface/frontend
+      dockerfile: Dockerfile
+    container_name: apbd_frontend
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "8501:8501"
 
+  # ==================== AGENT RL ====================
+  agent:
+    build:
+      context: ../agent
+      dockerfile: Dockerfile
+    container_name: apbd_agent
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: apbd_user
+      MYSQL_PASSWORD: apbd_pass
+      MYSQL_DATABASE: pos
+    ports:
+      - "8002:8000"
+    volumes:
+      - agent_models:/app/models
+
+  # ==================== MONITORING ====================
   grafana:
     image: grafana/grafana:latest
-    container_name: grafana
+    container_name: apbd_grafana
+    restart: always
     ports:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
 
   prometheus:
-    image: prom/prometheus
-    container_name: prometheus
+    image: prom/prometheus:latest
+    container_name: apbd_prometheus
+    restart: always
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
@@ -83,3 +108,4 @@ services:
 volumes:
   mysql_data:
   grafana_data:
+  agent_models:

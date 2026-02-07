@@ -1,10 +1,10 @@
-"""
-Générateur de Dataset  - Prédiction Requêtes SQL Lentes
+﻿"""
+G├⌐n├⌐rateur de Dataset  - Pr├⌐diction Requ├¬tes SQL Lentes
 ===========================================================
-Dataset réaliste pour entraîner un modèle de classification.
+Dataset r├⌐aliste pour entra├«ner un mod├¿le de classification.
 
-IMPORTANT: La lenteur NE dépend PAS de la longueur de la requête.
-Elle dépend de facteurs DB réalistes (index, rows, joins, etc.)
+IMPORTANT: La lenteur NE d├⌐pend PAS de la longueur de la requ├¬te.
+Elle d├⌐pend de facteurs DB r├⌐alistes (index, rows, joins, etc.)
 """
 
 import numpy as np
@@ -13,30 +13,30 @@ from typing import Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
-# Seed pour reproductibilité
+# Seed pour reproductibilit├⌐
 np.random.seed(42)
 
 
 class SQLQueryDatasetGenerator:
-    """Génère un dataset réaliste de requêtes SQL avec label slow/fast."""
+    """G├⌐n├¿re un dataset r├⌐aliste de requ├¬tes SQL avec label slow/fast."""
 
     def __init__(self, n_samples: int = 3000, slow_ratio: float = 0.45):
         """
         Args:
-            n_samples: Nombre de lignes à générer
-            slow_ratio: Proportion de requêtes lentes (0.4-0.5 recommandé)
+            n_samples: Nombre de lignes ├á g├⌐n├⌐rer
+            slow_ratio: Proportion de requ├¬tes lentes (0.4-0.5 recommand├⌐)
         """
         self.n_samples = n_samples
         self.slow_ratio = slow_ratio
-        self.noise_flip_rate = 0.05  # 5% de bruit réaliste
+        self.noise_flip_rate = 0.05  # 5% de bruit r├⌐aliste
 
     def _generate_query_complexity_features(self) -> dict:
-        """Génère les features de complexité de requête."""
+        """G├⌐n├¿re les features de complexit├⌐ de requ├¬te."""
         n = self.n_samples
 
-        # Longueur requête (log) - DÉCORRÉLÉE de la lenteur
-        # On génère indépendamment pour casser la corrélation
-        query_length_log = np.random.uniform(3.5, 8.5, n)  # log(30) à log(5000)
+        # Longueur requ├¬te (log) - D├ëCORR├ëL├ëE de la lenteur
+        # On g├⌐n├¿re ind├⌐pendamment pour casser la corr├⌐lation
+        query_length_log = np.random.uniform(3.5, 8.5, n)  # log(30) ├á log(5000)
 
         # Nombre de JOINs (0-6)
         num_joins = np.random.choice([0, 1, 2, 3, 4, 5, 6], n,
@@ -49,18 +49,18 @@ class SQLQueryDatasetGenerator:
         num_where = np.random.poisson(3, n)
         num_where = np.clip(num_where, 0, 10)
 
-        # Clauses spéciales
+        # Clauses sp├⌐ciales
         has_group_by = np.random.binomial(1, 0.30, n)
         has_order_by = np.random.binomial(1, 0.45, n)
         has_limit = np.random.binomial(1, 0.40, n)
 
-        # Agrégats (0-5)
+        # Agr├⌐gats (0-5)
         num_aggregates = np.where(has_group_by == 1,
                                    np.random.poisson(2, n),
                                    np.random.binomial(1, 0.2, n))
         num_aggregates = np.clip(num_aggregates, 0, 5)
 
-        # Sous-requêtes (0-3)
+        # Sous-requ├¬tes (0-3)
         num_subqueries = np.random.choice([0, 1, 2, 3], n,
                                            p=[0.65, 0.25, 0.08, 0.02])
 
@@ -77,19 +77,19 @@ class SQLQueryDatasetGenerator:
         }
 
     def _generate_db_simulation_features(self) -> dict:
-        """Génère les features simulant l'état de la DB."""
+        """G├⌐n├¿re les features simulant l'├⌐tat de la DB."""
         n = self.n_samples
 
-        # Taille estimée des tables (MB) - distribution log-normale
-        # Petites tables (1-10MB) fréquentes, grandes tables (1000MB+) rares
+        # Taille estim├⌐e des tables (MB) - distribution log-normale
+        # Petites tables (1-10MB) fr├⌐quentes, grandes tables (1000MB+) rares
         estimated_table_size_mb = np.exp(np.random.normal(4, 2, n))
         estimated_table_size_mb = np.clip(estimated_table_size_mb, 0.1, 10000)
 
-        # Rows examined - corrélé à la taille table + absence index
+        # Rows examined - corr├⌐l├⌐ ├á la taille table + absence index
         base_rows = estimated_table_size_mb * np.random.uniform(50, 200, n)
         rows_examined = np.clip(base_rows, 10, 50_000_000).astype(int)
 
-        # Index utilisé (0/1) - crucial pour la performance
+        # Index utilis├⌐ (0/1) - crucial pour la performance
         # Plus la table est grande, plus important d'avoir un index
         index_probability = np.where(estimated_table_size_mb > 100, 0.7, 0.5)
         has_index_used = np.random.binomial(1, index_probability)
@@ -108,11 +108,11 @@ class SQLQueryDatasetGenerator:
         }
 
     def _generate_server_context_features(self) -> dict:
-        """Génère les features de contexte serveur."""
+        """G├⌐n├¿re les features de contexte serveur."""
         n = self.n_samples
 
-        # Buffer pool hit ratio (0.3 à 0.99)
-        # La plupart des DB bien configurées ont un ratio élevé
+        # Buffer pool hit ratio (0.3 ├á 0.99)
+        # La plupart des DB bien configur├⌐es ont un ratio ├⌐lev├⌐
         buffer_pool_hit_ratio = np.random.beta(8, 2, n) * 0.69 + 0.30
         buffer_pool_hit_ratio = np.clip(buffer_pool_hit_ratio, 0.30, 0.99)
 
@@ -130,7 +130,7 @@ class SQLQueryDatasetGenerator:
         }
 
     def _compute_derived_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calcule les features dérivées."""
+        """Calcule les features d├⌐riv├⌐es."""
 
         # Joins par table
         df['joins_per_table'] = np.where(
@@ -140,7 +140,7 @@ class SQLQueryDatasetGenerator:
         )
         df['joins_per_table'] = np.round(df['joins_per_table'], 3)
 
-        # Score de complexité composite
+        # Score de complexit├⌐ composite
         df['complexity_score'] = (
             df['num_joins'] * 2 +
             df['num_subqueries'] * 3 +
@@ -334,17 +334,17 @@ class SQLQueryDatasetGenerator:
         return df
 
     def generate(self) -> pd.DataFrame:
-        """Génère le dataset complet."""
+        """G├⌐n├¿re le dataset complet."""
 
-        # 1. Générer toutes les features
+        # 1. G├⌐n├⌐rer toutes les features
         complexity = self._generate_query_complexity_features()
         db_sim = self._generate_db_simulation_features()
         server = self._generate_server_context_features()
 
-        # 2. Créer le DataFrame
+        # 2. Cr├⌐er le DataFrame
         df = pd.DataFrame({**complexity, **db_sim, **server})
 
-        # 3. Calculer features dérivées
+        # 3. Calculer features d├⌐riv├⌐es
         df = self._compute_derived_features(df)
 
         # 4. Calculer le label
@@ -353,9 +353,9 @@ class SQLQueryDatasetGenerator:
         # 5. Forcer les contre-exemples
         df = self._force_counterexamples(df)
 
-        # 6. Réordonner les colonnes
+        # 6. R├⌐ordonner les colonnes
         column_order = [
-            # Complexité requête
+            # Complexit├⌐ requ├¬te
             'query_length_log', 'num_joins', 'num_tables', 'num_where',
             'has_group_by', 'has_order_by', 'has_limit',
             'num_aggregates', 'num_subqueries',
@@ -364,7 +364,7 @@ class SQLQueryDatasetGenerator:
             'has_index_used', 'index_count',
             # Contexte serveur
             'buffer_pool_hit_ratio', 'connections_count', 'is_peak_hour',
-            # Features dérivées
+            # Features d├⌐riv├⌐es
             'joins_per_table', 'complexity_score',
             # Target
             'is_slow'
@@ -372,13 +372,13 @@ class SQLQueryDatasetGenerator:
 
         df = df[column_order]
 
-        # 7. Mélanger les lignes
+        # 7. M├⌐langer les lignes
         df = df.sample(frac=1).reset_index(drop=True)
 
         return df
 
     def validate_dataset(self, df: pd.DataFrame) -> dict:
-        """Valide la qualité du dataset généré."""
+        """Valide la qualit├⌐ du dataset g├⌐n├⌐r├⌐."""
 
         stats = {
             'n_samples': len(df),
@@ -386,19 +386,19 @@ class SQLQueryDatasetGenerator:
             'fast_ratio': 1 - df['is_slow'].mean(),
         }
 
-        # Corrélation longueur vs slow (doit être FAIBLE)
+        # Corr├⌐lation longueur vs slow (doit ├¬tre FAIBLE)
         length_slow_corr = df['query_length_log'].corr(df['is_slow'])
         stats['length_slow_correlation'] = round(length_slow_corr, 3)
 
-        # Corrélation rows_examined vs slow (doit être FORTE)
+        # Corr├⌐lation rows_examined vs slow (doit ├¬tre FORTE)
         rows_slow_corr = df['rows_examined'].corr(df['is_slow'])
         stats['rows_slow_correlation'] = round(rows_slow_corr, 3)
 
-        # Corrélation index vs slow (doit être NÉGATIVE)
+        # Corr├⌐lation index vs slow (doit ├¬tre N├ëGATIVE)
         index_slow_corr = df['has_index_used'].corr(df['is_slow'])
         stats['index_slow_correlation'] = round(index_slow_corr, 3)
 
-        # Vérifier les contre-exemples
+        # V├⌐rifier les contre-exemples
         short_slow = df[(df['query_length_log'] < 5) & (df['is_slow'] == 1)]
         long_fast = df[(df['query_length_log'] > 7) & (df['is_slow'] == 0)]
 
@@ -416,7 +416,7 @@ def main():
     print("=" * 60)
 
     # Configuration
-    N_SAMPLES = 20000  # Nombre de requêtes à générer
+    N_SAMPLES = 20000  # Nombre de requ├¬tes ├á g├⌐n├⌐rer
     SLOW_RATIO = 0.45  # 45% slow, 55% fast
 
     # Generation

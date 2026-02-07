@@ -1,161 +1,173 @@
-# SQL Query Performance Dataset
+# SADOP - Système Autonome de Diagnostic et d'Optimisation de Performance SQL
 
-Dataset synthetique pour entrainer un modele de classification predisant si une requete SQL sera **lente** ou **rapide**.
-
-## Objectif
-
-Predire `is_slow` (0 = rapide, 1 = lent) a partir de caracteristiques realistes de requetes SQL.
-
-**Important**: Ce dataset est concu pour eviter la correlation triviale `longueur requete = lent`. La lenteur depend de facteurs DB realistes.
+Système complet d'optimisation de bases de données MySQL utilisant **3 vrais modèles de Machine Learning** (Random Forest, XGBoost, Logistic Regression) et **Reinforcement Learning (DQN)**.
 
 ---
 
-## Structure du Dataset
-
-| Fichier | Description |
-|---------|-------------|
-| `sql_query_performance_dataset.csv` | Dataset genere (20000 lignes) |
-| `generate_aml_dataset.py` | Script de generation |
-| `validate_dataset.py` | Script de validation ML |
-
----
-
-## Features
-
-### A. Complexite Requete
-
-| Feature | Type | Description |
-|---------|------|-------------|
-| `query_length_log` | float | Log de la longueur de la requete (3.5-8.5) |
-| `num_joins` | int | Nombre de JOINs (0-6) |
-| `num_tables` | int | Nombre de tables impliquees (1-8) |
-| `num_where` | int | Nombre de conditions WHERE (0-10) |
-| `has_group_by` | 0/1 | Presence de GROUP BY |
-| `has_order_by` | 0/1 | Presence de ORDER BY |
-| `has_limit` | 0/1 | Presence de LIMIT |
-| `num_aggregates` | int | Nombre de fonctions d'agregation (0-5) |
-| `num_subqueries` | int | Nombre de sous-requetes (0-3) |
-
-### B. Simulation Base de Donnees
-
-| Feature | Type | Description |
-|---------|------|-------------|
-| `estimated_table_size_mb` | float | Taille estimee des tables (MB) |
-| `rows_examined` | int | Nombre de lignes examinees |
-| `has_index_used` | 0/1 | Index utilise pour la requete |
-| `index_count` | int | Nombre d'index disponibles (0-8) |
-
-### C. Contexte Serveur
-
-| Feature | Type | Description |
-|---------|------|-------------|
-| `buffer_pool_hit_ratio` | float | Ratio de cache hit (0.3-0.99) |
-| `connections_count` | int | Connexions actives (1-50) |
-| `is_peak_hour` | 0/1 | Heure de pointe |
-
-### D. Features Derivees
-
-| Feature | Type | Description |
-|---------|------|-------------|
-| `joins_per_table` | float | Ratio joins/tables |
-| `complexity_score` | float | Score de complexite composite |
-
-### Target
-
-| Feature | Type | Description |
-|---------|------|-------------|
-| `is_slow` | 0/1 | 0 = rapide, 1 = lent |
-
----
-
-## Regles de Generation
-
-La lenteur est calculee selon des regles DB realistes:
-
-### Facteurs qui RALENTISSENT
-- `rows_examined` eleve (impact fort)
-- `estimated_table_size_mb` grande (impact fort)
-- `num_joins` multiple (impact fort)
-- `num_subqueries` (impact fort)
-- `has_group_by` sans index
-- `has_order_by` sur grande table
-- `is_peak_hour` = 1
-- Faible `buffer_pool_hit_ratio`
-
-### Facteurs qui ACCELERENT
-- `has_limit` = 1 (impact fort)
-- `has_index_used` = 1
-- Table petite avec index
-- Requete simple (peu de joins)
-
-### Contre-exemples forces (32% du dataset)
-
-Pour eviter un modele trivial:
-
-1. **Courtes mais lentes**: petite query + table enorme + pas d'index
-2. **Longues mais rapides**: grande query + bon index + LIMIT
-3. **Index present mais lent**: table enorme + beaucoup de joins + peak hour
-4. **Pas d'index mais rapide**: petite table + LIMIT + bon cache
-
----
-
-## Utilisation
-
-### Generer le dataset
+## 🚀 Démarrage rapide
 
 ```bash
-python generate_aml_dataset.py
+cd docker
+docker-compose up --build
 ```
 
-### Valider avec ML
+Une fois tous les services démarrés :
+
+| Service       | URL                          | Description                        |
+|---------------|------------------------------|------------------------------------|
+| **Frontend**  | http://localhost:8501         | Interface Streamlit                |
+| **Backend**   | http://localhost:8000         | API FastAPI (+ docs Swagger)       |
+| **API Docs**  | http://localhost:8000/docs    | Documentation interactive Swagger  |
+| **Agent RL**  | http://localhost:8002         | API de l'agent RL                  |
+| **Grafana**   | http://localhost:3000         | Monitoring (admin/admin)           |
+| **Prometheus**| http://localhost:9090         | Métriques                          |
+| **MySQL**     | localhost:3308                | Base de données (apbd_user/apbd_pass) |
+
+---
+
+## 📁 Structure du projet
+
+```
+APBD/
+├── docker/                          # Infrastructure Docker
+│   ├── docker-compose.yml           # ⭐ Point d'entrée unique
+│   ├── mysql/
+│   │   └── my.ini                   # Configuration MySQL optimisée
+│   └── monitoring/
+│       └── prometheus.yml           # Configuration Prometheus
+│
+├── apbd_interface/                  # Application principale
+│   ├── backend/                     # API FastAPI
+│   │   ├── Dockerfile
+│   │   ├── main.py                  # API avec 3 vrais modèles ML
+│   │   ├── generate_dataset.py      # Générateur de dataset d'entraînement
+│   │   └── requirements.txt
+│   └── frontend/                    # Interface Streamlit
+│       ├── Dockerfile
+│       ├── app.py                   # Dashboard complet (7 pages)
+│       └── requirements.txt
+│
+├── agent/                           # Agent Reinforcement Learning
+│   ├── Dockerfile
+│   ├── agent_api.py                 # API Flask de l'agent
+│   ├── config.py                    # Configuration (env vars)
+│   ├── env_enhanced.py              # Environnement Gymnasium
+│   ├── mysql_utils.py               # Utilitaires MySQL
+│   ├── train_agent.py               # Script d'entraînement DQN
+│   └── requirements.txt
+│
+└── sql/                             # Scripts SQL
+    ├── schema.sql                   # Schéma complet BDD POS + données
+    ├── queries_bad.sql              # Requêtes lentes (test)
+    └── indexes_bad.sql              # Index sous-optimaux (test)
+```
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  Frontend Streamlit                  │
+│         (Dashboard + Chat IA + 7 pages)             │
+│                  :8501                               │
+└─────────────────┬───────────────────────────────────┘
+                  │ HTTP
+┌─────────────────▼───────────────────────────────────┐
+│                Backend FastAPI                       │
+│   3 Modèles ML : RF + XGBoost + LR                 │
+│   Simulateur RL + Chat Agent + CSV Upload           │
+│                  :8000                               │
+└────────┬────────────────────────┬────────────────────┘
+         │                        │
+┌────────▼────────┐    ┌──────────▼──────────┐
+│   MySQL 8.0     │    │   Agent RL (DQN)    │
+│   BDD POS       │◄───│   Optimisation      │
+│   :3306         │    │   d'index           │
+│                 │    │   :8000 (→ :8002)   │
+└─────────────────┘    └─────────────────────┘
+```
+
+---
+
+## 🔧 Fonctionnalités
+
+### 🔍 Prédiction ML (3 modèles entraînés)
+- **Random Forest** 🌲 : Classifieur d'ensemble robuste
+- **XGBoost** 🚀 : Gradient boosting haute performance
+- **Logistic Regression** 📐 : Modèle linéaire interprétable
+- Chaque modèle prédit si une requête SQL sera **lente** ou **rapide**
+- Extraction automatique de **20 features** (JOINs, sous-requêtes, GROUP BY, taille des tables...)
+- Comparaison des 3 modèles côte à côte avec métriques (accuracy, F1-score, AUC)
+
+### 📂 Analyse par fichier CSV
+- Upload de fichiers CSV contenant des requêtes SQL
+- Prédiction batch avec les 3 modèles simultanément
+- Résumé statistique des résultats
+
+### 🤖 Optimisation RL (Reinforcement Learning)
+- Agent DQN qui apprend à **créer/supprimer des index**
+- 3 actions : CREATE, DROP, NOOP
+- Récompenses basées sur l'amélioration réelle des performances
+- Max 5 index simultanés
+
+### 💬 Assistant IA
+- Chat interactif pour analyser des requêtes
+- Suggestions d'optimisation automatique
+- Recommandations d'index
+
+### 📊 Monitoring
+- Dashboard temps réel avec métriques des modèles ML
+- F1-Score comparatif des 3 modèles
+- Historique des optimisations
+- Graphiques d'évolution (Plotly)
+
+---
+
+## 🧠 Pipeline ML
+
+1. **Génération du dataset** : `generate_dataset.py` crée un dataset synthétique de 3000 requêtes SQL avec 20 features
+2. **Entraînement** : Au démarrage du backend, les 3 modèles sont entraînés sur le dataset (train/test split 80/20)
+3. **Prédiction** : Pour chaque requête SQL, les features sont extraites puis passées aux 3 modèles
+4. **Fallback** : Si `generate_dataset.py` échoue, un dataset minimal de 1000 lignes est généré automatiquement
+
+---
+
+## ⚙️ Configuration
+
+Toutes les configurations se font via **variables d'environnement** (définies dans le `docker-compose.yml`) :
+
+| Variable         | Défaut       | Description              |
+|------------------|-------------|--------------------------|
+| `MYSQL_HOST`     | `mysql`     | Hôte de la BDD           |
+| `MYSQL_PORT`     | `3306`      | Port de la BDD           |
+| `MYSQL_USER`     | `apbd_user` | Utilisateur MySQL        |
+| `MYSQL_PASSWORD`  | `apbd_pass` | Mot de passe MySQL       |
+| `MYSQL_DATABASE`  | `pos`       | Nom de la base           |
+| `BACKEND_URL`    | `http://backend:8000` | URL du backend (frontend) |
+
+---
+
+## 🛑 Arrêt
 
 ```bash
-python validate_dataset.py
+cd docker
+docker-compose down
+```
+
+Pour supprimer aussi les données :
+```bash
+docker-compose down -v
 ```
 
 ---
 
-## Metriques Attendues
+## 📦 Base de données POS
 
-Un bon modele sur ce dataset devrait obtenir:
-
-| Metrique | Plage Attendue |
-|----------|----------------|
-| Accuracy | 75% - 90% |
-| ROC AUC | 0.80 - 0.95 |
-| Top feature importance | < 35% |
-
-### Feature Importance Typique
-
-```
-rows_examined             ~22%
-estimated_table_size_mb   ~19%
-has_limit                 ~10%
-complexity_score          ~8%
-num_joins                 ~5%
-has_index_used            ~5%
-```
-
-**Si accuracy > 95%**: dataset trop facile, ajuster les poids.
+Tables principales : `admin`, `clients`, `wilayas`, `products`, `promotions`, `offers`, `cart`, `orders`, `claims`, `comments`, `rating`, `favorites`, `returns`, `inbox`, `query_logs`
 
 ---
 
-## Distribution
-
-```
-Fast (is_slow=0): ~53%
-Slow (is_slow=1): ~47%
-```
-
----
-
-## Configuration
-
-Dans `generate_dataset.py`:
-
-```python
-N_SAMPLES = 20000      # Nombre de lignes
-SLOW_RATIO = 0.45     # Proportion de slow
-```
+**SADOP v5.0** | © APBD Team
 
 

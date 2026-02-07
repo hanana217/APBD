@@ -5,12 +5,10 @@ WORKDIR /app
 # Installer les dépendances Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
 # Copier le code
 COPY . .
 
-# Créer le dossier modèles
-RUN mkdir -p models
+EXPOSE 8501
 
-EXPOSE 8000
-
-CMD ["python", "agent_api.py"]
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]

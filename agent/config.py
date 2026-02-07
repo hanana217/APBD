@@ -1,9 +1,11 @@
+import os
+
 MYSQL_CONFIG = {
-    'host': 'localhost',      # localhost quand tu es sur Windows
-    'port': 3308,             # Port exposé par Docker
-    'user': 'apbd_user',
-    'password': 'apbd_pass',
-    'database': 'pos',
+    'host': os.environ.get('MYSQL_HOST', 'localhost'),
+    'port': int(os.environ.get('MYSQL_PORT', '3306')),
+    'user': os.environ.get('MYSQL_USER', 'apbd_user'),
+    'password': os.environ.get('MYSQL_PASSWORD', 'apbd_pass'),
+    'database': os.environ.get('MYSQL_DATABASE', 'pos'),
     'autocommit': True
 }
 
@@ -13,4 +15,4 @@ EPISODE_LENGTH = 25
 INDEX_CREATION_COST = 0.02
 INDEX_DROP_PENALTY = 0.01
 
-print(f"🔧 Mode LOCAL - MySQL: {MYSQL_CONFIG['host']}:{MYSQL_CONFIG['port']}")
+print(f"🔧 MySQL: {MYSQL_CONFIG['host']}:{MYSQL_CONFIG['port']}")

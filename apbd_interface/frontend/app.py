@@ -1,4 +1,5 @@
 # frontend/app.py - INTERFACE SADOP COMPLÈTE AVEC RL
+import os
 import streamlit as st
 import requests
 import json
@@ -66,7 +67,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <h1>🚀 SADOP - Système Autonome de Diagnostic et d'Optimisation</h1>
-    <p><strong>🔍 XGBoost + 🤖 Reinforcement Learning + 📊 Analyse en temps réel</strong></p>
+    <p><strong>🌲 Random Forest + 🚀 XGBoost + 📐 Logistic Regression + 🤖 RL</strong></p>
     <p style="opacity: 0.8;">Système complet d'optimisation de bases de données MySQL</p>
 </div>
 """, unsafe_allow_html=True)
@@ -76,9 +77,10 @@ with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/4299/4299756.png", width=80)
     st.header("⚙️ Configuration")
     
+    default_api_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
     api_url = st.text_input(
         "URL de l'API SADOP",
-        value="http://localhost:8000",
+        value=default_api_url,
         help="URL du backend FastAPI"
     )
     
@@ -201,17 +203,33 @@ if page == "🏠 Tableau de bord":
         st.plotly_chart(fig, use_container_width=True)
     
     with col_chart2:
-        st.subheader("🔮 Prédictions XGBoost")
+        st.subheader("🔮 Modèles ML actifs")
         
-        # Distribution des prédictions
-        labels = ['Rapide', 'Lente', 'Incertaine']
-        values = [65, 25, 10]
-        
-        fig = px.pie(values=values, names=labels, 
-                     title="Distribution des prédictions",
-                     color_discrete_sequence=px.colors.sequential.RdBu)
-        fig.update_layout(height=300)
-        st.plotly_chart(fig, use_container_width=True)
+        # Métriques réelles depuis l'API
+        try:
+            metrics_resp = requests.get(f"{api_url}/api/metrics", timeout=5)
+            if metrics_resp.status_code == 200:
+                m_data = metrics_resp.json()
+                if m_data.get("success"):
+                    model_names = list(m_data["models"].keys())
+                    f1_scores = [m_data["models"][n]["f1"] for n in model_names]
+                    fig = px.bar(x=model_names, y=f1_scores,
+                               title="F1-Score des modèles ML",
+                               labels={"x": "Modèle", "y": "F1-Score"},
+                               color=model_names,
+                               color_discrete_sequence=['#28a745', '#007bff', '#fd7e14'])
+                    fig.update_layout(height=300, yaxis_range=[0, 1])
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    raise Exception("API non ready")
+        except:
+            labels = ['Random Forest', 'XGBoost', 'Logistic Regression']
+            values = [0.85, 0.87, 0.80]
+            fig = px.bar(x=labels, y=values,
+                        title="F1-Score des modèles (en attente API)",
+                        labels={"x": "Modèle", "y": "F1-Score"})
+            fig.update_layout(height=300, yaxis_range=[0, 1])
+            st.plotly_chart(fig, use_container_width=True)
     
     # Dernières actions
     st.subheader("🔄 Dernières actions")
@@ -330,7 +348,7 @@ elif page == "💬 Assistant IA":
             st.rerun()
 
 elif page == "🔍 Analyse XGBoost":
-    st.header("🔍 Analyse XGBoost")
+    st.header("🔍 Analyse ML (Random Forest + XGBoost + Logistic Regression)")
     
     tab1, tab2, tab3 = st.tabs(["📝 Analyse", "📈 Statistiques", "📋 Historique"])
     
@@ -362,9 +380,9 @@ elif page == "🔍 Analyse XGBoost":
             placeholder="SELECT * FROM table WHERE condition"
         )
         
-        if st.button("🔮 Analyser avec XGBoost", type="primary", use_container_width=True):
+        if st.button("🔮 Analyser avec les 3 modèles ML", type="primary", use_container_width=True):
             if sql_input:
-                with st.spinner("XGBoost analyse la requête..."):
+                with st.spinner("Analyse avec RF + XGBoost + LR..."):
                     try:
                         response = requests.post(
                             f"{api_url}/api/analyze/sql",
@@ -387,27 +405,41 @@ elif page == "🔍 Analyse XGBoost":
                                 # Afficher résultats
                                 prediction = data["prediction"]
                                 execution = data["execution"]
+                                all_models = data.get("all_models", {})
                                 
-                                # Card XGBoost
+                                # Affichage des 3 modèles ML
                                 st.markdown("""
                                 <div class="xgboost-card">
-                                    <h3>🤖 Prédiction XGBoost</h3>
+                                    <h3>🤖 Prédiction ML (3 modèles réels)</h3>
                                 </div>
                                 """, unsafe_allow_html=True)
                                 
-                                col_pred, col_conf, col_prob = st.columns(3)
-                                
-                                with col_pred:
-                                    if prediction["is_slow"]:
-                                        st.error("⚠️ PRÉDIT LENTE")
-                                    else:
-                                        st.success("✅ PRÉDIT RAPIDE")
-                                
-                                with col_conf:
-                                    st.metric("Confiance", f"{prediction['confidence']*100:.1f}%")
-                                
-                                with col_prob:
-                                    st.metric("Probabilité", f"{prediction['slow_probability']*100:.1f}%")
+                                if all_models:
+                                    model_cols = st.columns(len(all_models))
+                                    model_names_display = {
+                                        'random_forest': '🌲 Random Forest',
+                                        'xgboost': '🚀 XGBoost',
+                                        'logistic_regression': '📐 Logistic Regression'
+                                    }
+                                    for i, (mname, mresult) in enumerate(all_models.items()):
+                                        with model_cols[i]:
+                                            display_name = model_names_display.get(mname, mname)
+                                            st.markdown(f"**{display_name}**")
+                                            if mresult['prediction'] == 1:
+                                                st.error(f"⚠️ LENTE ({mresult['probability_slow']}%)")
+                                            else:
+                                                st.success(f"✅ RAPIDE ({100-mresult['probability_slow']:.1f}%)")
+                                else:
+                                    col_pred, col_conf, col_prob = st.columns(3)
+                                    with col_pred:
+                                        if prediction["is_slow"]:
+                                            st.error("⚠️ PRÉDIT LENTE")
+                                        else:
+                                            st.success("✅ PRÉDIT RAPIDE")
+                                    with col_conf:
+                                        st.metric("Confiance", f"{prediction['confidence']*100:.1f}%")
+                                    with col_prob:
+                                        st.metric("Probabilité", f"{prediction['slow_probability']*100:.1f}%")
                                 
                                 # Raisons
                                 if prediction["reasons"]:
@@ -467,7 +499,7 @@ elif page == "🔍 Analyse XGBoost":
                 st.warning("Veuillez entrer une requête SQL")
     
     with tab2:
-        st.subheader("Statistiques XGBoost")
+        st.subheader("Statistiques des 3 modèles ML")
         
         # Graphique des prédictions
         if st.session_state.sql_history:
@@ -486,19 +518,42 @@ elif page == "🔍 Analyse XGBoost":
                            title="Historique des prédictions")
             st.plotly_chart(fig, use_container_width=True)
         
-        # Précision (simulée)
-        st.subheader("📊 Précision du modèle")
+        # Métriques réelles des 3 modèles
+        st.subheader("📊 Précision des modèles ML")
         
-        accuracy_data = {
-            "Métrique": ["Précision", "Rappel", "F1-Score", "AUC"],
-            "Valeur": [0.87, 0.82, 0.84, 0.89]
-        }
-        
-        acc_df = pd.DataFrame(accuracy_data)
-        fig = px.bar(acc_df, x="Métrique", y="Valeur", 
-                    title="Performance XGBoost",
-                    color="Valeur", color_continuous_scale="Viridis")
-        st.plotly_chart(fig, use_container_width=True)
+        try:
+            metrics_resp = requests.get(f"{api_url}/api/metrics", timeout=5)
+            if metrics_resp.status_code == 200:
+                metrics_data = metrics_resp.json()
+                if metrics_data.get("success"):
+                    real_metrics = metrics_data["models"]
+                    model_names = []
+                    accuracies = []
+                    aucs = []
+                    f1s = []
+                    for mname, mvals in real_metrics.items():
+                        model_names.append(mname)
+                        accuracies.append(mvals['accuracy'])
+                        aucs.append(mvals['roc_auc'])
+                        f1s.append(mvals['f1'])
+                    
+                    metrics_df = pd.DataFrame({
+                        'Modèle': model_names * 3,
+                        'Métrique': ['Accuracy']*len(model_names) + ['AUC']*len(model_names) + ['F1']*len(model_names),
+                        'Valeur': accuracies + aucs + f1s
+                    })
+                    fig = px.bar(metrics_df, x='Modèle', y='Valeur', color='Métrique',
+                                barmode='group', title='Performance des 3 modèles ML',
+                                color_discrete_sequence=['#667eea', '#f5576c', '#00f2fe'])
+                    fig.update_layout(yaxis_range=[0, 1])
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Tableau détaillé
+                    detail_df = pd.DataFrame(real_metrics).T
+                    detail_df.index.name = 'Modèle'
+                    st.dataframe(detail_df, use_container_width=True)
+        except:
+            st.info("Connectez-vous à l'API pour voir les métriques réelles")
     
     with tab3:
         st.subheader("Historique des analyses")
@@ -659,7 +714,7 @@ elif page == "🤖 Optimisation RL":
                             'threshold': {
                                 'line': {'color': "black", 'width': 4},
                                 'thickness': 0.75,
-                                'value': SLOW_QUERY_THRESHOLD
+                                'value': 0.5
                             }
                         }
                     ))

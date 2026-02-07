@@ -5,12 +5,10 @@ WORKDIR /app
 # Installer les dépendances Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
 # Copier le code
 COPY . .
 
-# Créer le dossier modèles
-RUN mkdir -p models
-
 EXPOSE 8000
 
-CMD ["python", "agent_api.py"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
