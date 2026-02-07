@@ -834,3 +834,6 @@
  SELECT * FROM clients                ;
  SELECT * FROM cart                    ;
  SELECT * FROM products            ; 
+
+
+
