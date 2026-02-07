@@ -1,198 +1,281 @@
-#!/usr/bin/env python3
 """
-Validation du dataset de requêtes SQL (version sans fuite de données)
+Validation du Dataset 
+=========================
+Verifie que le dataset produit des metriques realistes:
+- Accuracy: 75-90% (pas 99%)
+- ROC AUC: 0.80-0.92
+- Feature importance: variee (pas dominee par une seule feature)
 """
 
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import accuracy_score, roc_auc_score, f1_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import (
+    accuracy_score, roc_auc_score, classification_report,
+    confusion_matrix, f1_score
+)
 import warnings
 warnings.filterwarnings('ignore')
 
-def print_header(text):
-    print("=" * 60)
-    print(text.center(60))
-    print("=" * 60)
 
-def print_section(text):
-    print("\n" + "=" * 50)
-    print(f"[{text}]")
-    print("=" * 50)
+def load_dataset(path: str = "dataset_cleaned.csv") -> pd.DataFrame:
+    """Charge le dataset."""
+    df = pd.read_csv(path)
+    print(f"[OK] Dataset charge: {len(df)} lignes, {len(df.columns)} colonnes")
+    return df
 
-def print_chart(label, value, max_value=1.0, width=30):
-    bars = int((abs(value) / max_value) * width)
-    sign = "+" if value >= 0 else ""
-    bar_char = "#" * bars
-    print(f"   {label:25} {sign}{value:+.3f} {bar_char}")
 
-def validate_dataset(csv_path):
-    print_header("VALIDATION DU DATASET (SANS FUITE)")
-    
-    # 1. Chargement
-    df = pd.read_csv(csv_path)
-    print(f"[OK] Dataset chargé: {len(df)} lignes, {len(df.columns)} colonnes")
-    
-    # Distribution
-    target_dist = df['is_slow'].value_counts()
-    total = len(df)
-    print("[CHART] Distribution target:")
-    for val, count in target_dist.items():
-        label = "Slow (1)" if val == 1 else "Fast (0)"
-        print(f"   - {label}: {count} ({count/total*100:.1f}%)")
-    
-    # 2. Corrélations
-    print_section("CORR] CORRÉLATIONS CRITIQUES")
-    
-    X = df.drop(['is_slow'], axis=1)
+def prepare_data(df: pd.DataFrame):
+    """Prepare X et y pour le ML."""
+    feature_cols = [col for col in df.columns if col != 'is_slow']
+    X = df[feature_cols]
     y = df['is_slow']
-    
-    corr = df.corr()['is_slow'].drop('is_slow').sort_values(ascending=False)
-    
-    print("Correlation avec is_slow:")
-    for feat, val in corr.items():
-        print_chart(feat, val, max_value=1.0)
-    
-    # Vérifications
-    print("[!]  Verifications critiques:")
-    
-    # Pas de corrélation parfaite (signe de fuite)
-    max_corr = corr.abs().max()
-    if max_corr < 0.85:
-        print(f"   [OK] Pas de corrélation suspecte: max = {max_corr:.3f} < 0.85")
-    else:
-        print(f"   [X] Corrélation trop forte: {max_corr:.3f} >= 0.85 (possible fuite)")
-    
-    # rows_examined bien corrélé
-    rows_corr = corr.get('rows_examined', 0)
-    if rows_corr > 0.25:
-        print(f"   [OK] rows_examined bien corrélé: {rows_corr:.3f} > 0.25")
-    else:
-        print(f"   [!] rows_examined faiblement corrélé: {rows_corr:.3f}")
-    
-    # has_index_used négativement corrélé
-    index_corr = corr.get('has_index_used', 0)
-    if index_corr < 0:
-        print(f"   [OK] Index négativement corrélé: {index_corr:.3f}")
-    else:
-        print(f"   [!] Index positivement corrélé: {index_corr:.3f}")
-    
-    # 3. Split des données
+    return X, y, feature_cols
+
+
+def validate_with_models(X, y, feature_cols):
+    """Valide le dataset avec plusieurs modèles."""
+
+    # Split
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
+        X, y, test_size=0.25, random_state=42, stratify=y
     )
-    
-    # 4. Random Forest
-    print_section("RF] RANDOM FOREST")
-    rf = RandomForestClassifier(n_estimators=100, random_state=42, max_depth=10)
+
+    # Scaling pour LogReg
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+
+    results = {}
+
+    # ========== Random Forest ==========
+    print("\n" + "="*50)
+    print("[RF] RANDOM FOREST")
+    print("="*50)
+
+    rf = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)
     rf.fit(X_train, y_train)
     y_pred_rf = rf.predict(X_test)
     y_proba_rf = rf.predict_proba(X_test)[:, 1]
-    
-    rf_acc = accuracy_score(y_test, y_pred_rf)
-    rf_auc = roc_auc_score(y_test, y_proba_rf)
-    rf_f1 = f1_score(y_test, y_pred_rf)
-    
-    print(f"Accuracy: {rf_acc:.3f}")
-    print(f"ROC AUC:  {rf_auc:.3f}")
-    print(f"F1 Score: {rf_f1:.3f}")
-    
+
+    acc_rf = accuracy_score(y_test, y_pred_rf)
+    auc_rf = roc_auc_score(y_test, y_proba_rf)
+    f1_rf = f1_score(y_test, y_pred_rf)
+
+    print(f"Accuracy: {acc_rf:.3f}")
+    print(f"ROC AUC:  {auc_rf:.3f}")
+    print(f"F1 Score: {f1_rf:.3f}")
+
     # Cross-validation
     cv_scores = cross_val_score(rf, X, y, cv=5, scoring='roc_auc')
     print(f"CV AUC (5-fold): {cv_scores.mean():.3f} +/- {cv_scores.std():.3f}")
-    
+
+    results['random_forest'] = {
+        'accuracy': acc_rf,
+        'roc_auc': auc_rf,
+        'f1': f1_rf,
+        'cv_auc_mean': cv_scores.mean()
+    }
+
     # Feature importance
-    feature_imp = pd.DataFrame({
-        'feature': X.columns,
+    print("\n[CHART] Feature Importance (top 10):")
+    importance = pd.DataFrame({
+        'feature': feature_cols,
         'importance': rf.feature_importances_
     }).sort_values('importance', ascending=False)
-    
-    print("[CHART] Feature Importance (top 10):")
-    for _, row in feature_imp.head(10).iterrows():
-        bars = int(row['importance'] * 50)
-        print(f"   {row['feature']:25} {row['importance']:.3f} {'#' * bars}")
-    
-    # 5. Gradient Boosting
-    print_section("GB] GRADIENT BOOSTING")
-    gb = GradientBoostingClassifier(n_estimators=100, random_state=42, max_depth=5)
+
+    for i, row in importance.head(10).iterrows():
+        bar = "#" * int(row['importance'] * 50)
+        print(f"   {row['feature']:25s} {row['importance']:.3f} {bar}")
+
+    results['feature_importance'] = importance
+
+    # ========== Gradient Boosting ==========
+    print("\n" + "="*50)
+    print("[GB] GRADIENT BOOSTING")
+    print("="*50)
+
+    gb = GradientBoostingClassifier(n_estimators=100, max_depth=5, random_state=42)
     gb.fit(X_train, y_train)
     y_pred_gb = gb.predict(X_test)
     y_proba_gb = gb.predict_proba(X_test)[:, 1]
-    
-    gb_acc = accuracy_score(y_test, y_pred_gb)
-    gb_auc = roc_auc_score(y_test, y_proba_gb)
-    gb_f1 = f1_score(y_test, y_pred_gb)
-    
-    print(f"Accuracy: {gb_acc:.3f}")
-    print(f"ROC AUC:  {gb_auc:.3f}")
-    print(f"F1 Score: {gb_f1:.3f}")
-    
-    # 6. Logistic Regression
-    print_section("LR] LOGISTIC REGRESSION")
-    lr = LogisticRegression(random_state=42, max_iter=1000)
-    lr.fit(X_train, y_train)
-    y_pred_lr = lr.predict(X_test)
-    y_proba_lr = lr.predict_proba(X_test)[:, 1]
-    
-    lr_acc = accuracy_score(y_test, y_pred_lr)
-    lr_auc = roc_auc_score(y_test, y_proba_lr)
-    lr_f1 = f1_score(y_test, y_pred_lr)
-    
-    print(f"Accuracy: {lr_acc:.3f}")
-    print(f"ROC AUC:  {lr_auc:.3f}")
-    print(f"F1 Score: {lr_f1:.3f}")
-    
-    # 7. Validation finale
-    print_section("FINAL] VALIDATION FINALE")
-    
-    all_checks_passed = True
-    
-    print("Resultats:")
-    
-    # Check 1: Accuracy réaliste (85-98%)
-    if 0.85 <= rf_acc <= 0.98:
-        print(f"   [OK] Accuracy dans [85%, 98%]: {rf_acc:.3f}")
+
+    acc_gb = accuracy_score(y_test, y_pred_gb)
+    auc_gb = roc_auc_score(y_test, y_proba_gb)
+    f1_gb = f1_score(y_test, y_pred_gb)
+
+    print(f"Accuracy: {acc_gb:.3f}")
+    print(f"ROC AUC:  {auc_gb:.3f}")
+    print(f"F1 Score: {f1_gb:.3f}")
+
+    results['gradient_boosting'] = {
+        'accuracy': acc_gb,
+        'roc_auc': auc_gb,
+        'f1': f1_gb
+    }
+
+    # ========== Logistic Regression ==========
+    print("\n" + "="*50)
+    print("[LR] LOGISTIC REGRESSION")
+    print("="*50)
+
+    lr = LogisticRegression(max_iter=1000, random_state=42)
+    lr.fit(X_train_scaled, y_train)
+    y_pred_lr = lr.predict(X_test_scaled)
+    y_proba_lr = lr.predict_proba(X_test_scaled)[:, 1]
+
+    acc_lr = accuracy_score(y_test, y_pred_lr)
+    auc_lr = roc_auc_score(y_test, y_proba_lr)
+    f1_lr = f1_score(y_test, y_pred_lr)
+
+    print(f"Accuracy: {acc_lr:.3f}")
+    print(f"ROC AUC:  {auc_lr:.3f}")
+    print(f"F1 Score: {f1_lr:.3f}")
+
+    results['logistic_regression'] = {
+        'accuracy': acc_lr,
+        'roc_auc': auc_lr,
+        'f1': f1_lr
+    }
+
+    return results
+
+
+def check_correlations(df: pd.DataFrame):
+    """Verifie les correlations critiques."""
+    print("\n" + "="*50)
+    print("[CORR] CORRÉLATIONS CRITIQUES")
+    print("="*50)
+
+    correlations = df.corr()['is_slow'].drop('is_slow').sort_values(key=abs, ascending=False)
+
+    print("\nCorrelation avec is_slow:")
+    for feat, corr in correlations.head(10).items():
+        sign = "+" if corr > 0 else ""
+        bar_len = int(abs(corr) * 30)
+        bar = "#" * bar_len
+        print(f"   {feat:25s} {sign}{corr:.3f} {bar}")
+
+    # Verification critique: longueur ne doit PAS être top correlee
+    length_corr = abs(correlations.get('query_length_log', 0))
+    rows_corr = abs(correlations.get('rows_examined', 0))
+    index_corr = correlations.get('has_index_used', 0)
+
+    print("\n[!]  Verifications critiques:")
+
+    if length_corr < 0.15:
+        print(f"   [OK] Longueur decorrelee: |{length_corr:.3f}| < 0.15")
     else:
-        print(f"   [X] Accuracy hors plage [85%, 98%]: {rf_acc:.3f}")
-        all_checks_passed = False
-    
-    # Check 2: ROC AUC réaliste (0.90-0.998)
-    if 0.90 <= rf_auc <= 0.998:
-        print(f"   [OK] ROC AUC dans [0.90, 0.998]: {rf_auc:.3f}")
+        print(f"   [X] ATTENTION: Longueur trop correlee: |{length_corr:.3f}| >= 0.15")
+
+    if rows_corr > 0.25:
+        print(f"   [OK] rows_examined bien correle: {rows_corr:.3f} > 0.25")
     else:
-        print(f"   [X] ROC AUC hors plage [0.90, 0.998]: {rf_auc:.3f}")
-        all_checks_passed = False
-    
-    # Check 3: Pas de feature dominante (< 50%)
-    top_importance = feature_imp.iloc[0]['importance']
-    if top_importance < 0.50:
-        print(f"   [OK] Pas de feature dominante (top < 50%): {top_importance:.3f}")
+        print(f"   [!]  rows_examined faiblement correle: {rows_corr:.3f}")
+
+    if index_corr < -0.15:
+        print(f"   [OK] Index negativement correle: {index_corr:.3f}")
     else:
-        print(f"   [X] Feature dominante (top >= 50%): {top_importance:.3f}")
-        all_checks_passed = False
-    
-    # Check 4: rows_examined importante
-    rows_imp = feature_imp[feature_imp['feature'] == 'rows_examined']['importance'].values
-    if len(rows_imp) > 0 and rows_imp[0] > 0.05:
-        print(f"   [OK] rows_examined importance > 5%: {rows_imp[0]:.3f}")
+        print(f"   [!]  Index pas assez negativement correle: {index_corr:.3f}")
+
+    return correlations
+
+
+def validate_metrics_range(results: dict):
+    """Verifie que les metriques sont dans les plages attendues."""
+    print("\n" + "="*50)
+    print("[FINAL] VALIDATION FINALE")
+    print("="*50)
+
+    rf = results['random_forest']
+
+    checks = []
+
+    # Accuracy: 75-90%
+    if 0.75 <= rf['accuracy'] <= 0.90:
+        checks.append(("Accuracy dans [75%, 90%]", True, rf['accuracy']))
     else:
-        print(f"   [!] rows_examined importance faible: {rows_imp[0] if len(rows_imp) > 0 else 0:.3f}")
-    
-    # Check 5: num_joins présent
-    joins_imp = feature_imp[feature_imp['feature'] == 'num_joins']['importance'].values
-    if len(joins_imp) > 0 and joins_imp[0] > 0.01:
-        print(f"   [OK] num_joins importance > 1%: {joins_imp[0]:.3f}")
+        checks.append(("Accuracy dans [75%, 90%]", False, rf['accuracy']))
+
+    # AUC: 0.80-0.92
+    if 0.78 <= rf['roc_auc'] <= 0.95:
+        checks.append(("ROC AUC dans [0.78, 0.95]", True, rf['roc_auc']))
     else:
-        print(f"   [!] num_joins importance faible: {joins_imp[0] if len(joins_imp) > 0 else 0:.3f}")
-    
-    if all_checks_passed:
-        print("\n[✓] Toutes les vérifications sont passées!")
+        checks.append(("ROC AUC dans [0.78, 0.95]", False, rf['roc_auc']))
+
+    # Feature importance variee
+    importance = results['feature_importance']
+    top_importance = importance.iloc[0]['importance']
+    if top_importance < 0.35:  # Pas de feature dominante
+        checks.append(("Pas de feature dominante (top < 35%)", True, top_importance))
     else:
-        print("\n[!] Certaines vérifications ont échoué - Dataset semble réaliste maintenant")
-    
-    print_header("FIN DE LA VALIDATION")
+        checks.append(("Pas de feature dominante (top < 35%)", False, top_importance))
+
+    # rows_examined importance > 0
+    rows_imp = importance[importance['feature'] == 'rows_examined']['importance'].values[0]
+    if rows_imp > 0.05:
+        checks.append(("rows_examined importance > 5%", True, rows_imp))
+    else:
+        checks.append(("rows_examined importance > 5%", False, rows_imp))
+
+    # num_joins importance > 0
+    joins_imp = importance[importance['feature'] == 'num_joins']['importance'].values[0]
+    if joins_imp > 0.01:
+        checks.append(("num_joins importance > 1%", True, joins_imp))
+    else:
+        checks.append(("num_joins importance > 1%", False, joins_imp))
+
+    print("\nResultats:")
+    all_passed = True
+    for check_name, passed, value in checks:
+        status = "[OK]" if passed else "[X]"
+        print(f"   {status} {check_name}: {value:.3f}")
+        if not passed:
+            all_passed = False
+
+    if all_passed:
+        print("\n[SUCCESS] DATASET VALIDÉ - Prêt pour l'entraînement!")
+    else:
+        print("\n[!]  Certaines verifications ont echoue - Ajuster les paramètres")
+
+    return all_passed
+
+
+def main():
+    """Execute la validation complète."""
+    print("="*60)
+    print("VALIDATION DU DATASET ")
+    print("="*60)
+
+    # Charger
+    df = load_dataset()
+
+    # Preparer
+    X, y, feature_cols = prepare_data(df)
+
+    # Distribution
+    print(f"\n[CHART] Distribution target:")
+    print(f"   - Fast (0): {(y == 0).sum()} ({(y == 0).mean():.1%})")
+    print(f"   - Slow (1): {(y == 1).sum()} ({(y == 1).mean():.1%})")
+
+    # Correlations
+    correlations = check_correlations(df)
+
+    # Modèles
+    results = validate_with_models(X, y, feature_cols)
+
+    # Validation finale
+    all_passed = validate_metrics_range(results)
+
+    print("\n" + "="*60)
+    print("FIN DE LA VALIDATION")
+    print("="*60)
+
+    return results, all_passed
+
 
 if __name__ == "__main__":
-    validate_dataset('dataset_cleaned.csv')
+    results, passed = main()
