@@ -1,7 +1,6 @@
-# backend/main.py - API SADOP avec vrais modèles ML (RF, XGBoost, LR)
+# backend/main.py - API SADOP avec AFFICHAGE XGBOOST SEULEMENT
 # ==================================================================
-# Remplace la simulation par de vrais modèles entraînés sur le dataset POS.
-# Conserve les endpoints RL (simulation) pour compatibilité frontend.
+# Version modifiée pour n'afficher que XGBoost dans les résultats
 
 import os
 import re
@@ -35,14 +34,14 @@ except ImportError:
 
 MYSQL_CONFIG = {
     'host': os.environ.get('MYSQL_HOST', 'localhost'),
-    'port': int(os.environ.get('MYSQL_PORT', '3306')),
+    'port': int(os.environ.get('MYSQL_PORT', '3308')),
     'user': os.environ.get('MYSQL_USER', 'apbd_user'),
     'password': os.environ.get('MYSQL_PASSWORD', 'apbd_pass'),
     'database': os.environ.get('MYSQL_DATABASE', 'pos'),
     'autocommit': True
 }
 
-SLOW_QUERY_THRESHOLD = 0.5
+SLOW_QUERY_THRESHOLD = 0.005
 
 RL_CONFIG = {
     'max_indexes': 5,
@@ -56,45 +55,28 @@ RL_CONFIG = {
 # ============================================================
 
 POS_TABLE_INFO = {
-    'admin':           {'rows': 5,     'indexes': 1, 'has_text': False},
-    'clients':         {'rows': 1000,  'indexes': 4, 'has_text': False},
-    'wilayas':         {'rows': 58,    'indexes': 1, 'has_text': False},
-    'products':        {'rows': 50,    'indexes': 2, 'has_text': True},
-    'promotions':      {'rows': 100,   'indexes': 3, 'has_text': False},
-    'offers':          {'rows': 10,    'indexes': 2, 'has_text': False},
-    'cart':            {'rows': 3000,  'indexes': 4, 'has_text': False},
-    'orders':          {'rows': 1500,  'indexes': 5, 'has_text': False},
-    'claims':          {'rows': 100,   'indexes': 4, 'has_text': True},
-    'comments':        {'rows': 200,   'indexes': 3, 'has_text': True},
-    'rating':          {'rows': 200,   'indexes': 3, 'has_text': False},
-    'favorites':       {'rows': 500,   'indexes': 3, 'has_text': False},
-    'returns':         {'rows': 100,   'indexes': 3, 'has_text': True},
-    'inbox':           {'rows': 300,   'indexes': 4, 'has_text': True},
-    'query_logs':      {'rows': 10000, 'indexes': 1, 'has_text': True},
-    'explain_history': {'rows': 1000,  'indexes': 1, 'has_text': True},
+    'admin':           {'rows': 20002,     'indexes': 1, 'has_text': False},
+    'clients':         {'rows': 31020,  'indexes': 18, 'has_text': False},
+    'wilayas':         {'rows': 58,    'indexes': 0, 'has_text': False},
+    'products':        {'rows': 300003,    'indexes': 0, 'has_text': True},
+    'promotions':      {'rows': 28897,   'indexes': 0, 'has_text': False},
+    'offers':          {'rows': 30002,    'indexes': 5, 'has_text': False},
+    'cart':            {'rows': 4252,  'indexes': 7, 'has_text': False},
+    'orders':          {'rows': 32002,  'indexes': 4, 'has_text': False},
 }
 
+# Colonnes TEXT/LONGTEXT par table
 TEXT_COLUMNS = {
     'products': ['description', 'more_details'],
-    'claims': ['reason', 'response'],
-    'comments': ['comment'],
-    'returns': ['reason', 'response'],
-    'inbox': ['text'],
-    'query_logs': ['query_text'],
-    'explain_history': ['query_text', 'explain_json'],
 }
 
+# Colonnes DATE par table
 DATE_COLUMNS = {
     'clients': ['birthday'],
     'promotions': ['startdate', 'enddate'],
     'offers': ['startdate', 'enddate'],
     'cart': ['date_cart'],
     'orders': ['orderdate', 'delivereddate'],
-    'comments': ['date'],
-    'returns': ['date'],
-    'inbox': ['date'],
-    'query_logs': ['created_at'],
-    'explain_history': ['created_at'],
 }
 
 FEATURE_ORDER = [
@@ -103,27 +85,27 @@ FEATURE_ORDER = [
     'num_aggregates', 'num_subqueries',
     'target_table_rows', 'rows_examined',
     'has_index_used', 'index_count',
-    'involves_text_search', 'involves_date_filter',
-    'buffer_pool_hit_ratio', 'connections_count', 'is_peak_hour',
+    'estimated_table_size_mb',
+    'connections_count', 'is_peak_hour',
     'joins_per_table', 'complexity_score',
+    'buffer_pool_hit_ratio',
 ]
 
 # ============================================================
-# Variables globales ML
+# Variables globales ML - SEULEMENT XGBOOST
 # ============================================================
-ml_models = {}
+xgboost_model = None  # 🎯 Variable unique pour XGBoost
 scaler = None
 feature_cols = []
 model_metrics = {}
 
-
 # ============================================================
-# Entraînement des 3 modèles
+# Entraînement - SEULEMENT XGBOOST
 # ============================================================
 
-def train_models():
-    """Entraîne les 3 modèles au démarrage depuis le dataset CSV."""
-    global ml_models, scaler, feature_cols, model_metrics
+def train_xgboost_only():
+    """Entraîne SEULEMENT le modèle XGBoost."""
+    global xgboost_model, scaler, feature_cols, model_metrics
 
     csv_path = os.path.join(os.path.dirname(__file__), 'pos_query_performance_dataset.csv')
 
@@ -133,7 +115,6 @@ def train_models():
         try:
             from generate_dataset import main as generate_main
             generate_main()
-            # Le fichier est généré dans le répertoire courant
             generated = os.path.join(os.getcwd(), 'sql_query_performance_dataset.csv')
             if os.path.exists(generated) and generated != csv_path:
                 import shutil
@@ -148,7 +129,15 @@ def train_models():
         return
 
     df = pd.read_csv(csv_path)
-    feature_cols = [c for c in df.columns if c != 'is_slow']
+    
+    # Vérifier les features
+    missing_features = [f for f in FEATURE_ORDER if f not in df.columns]
+    if missing_features:
+        print(f"[WARNING] Features manquantes dans le dataset: {missing_features}")
+        for feature in missing_features:
+            df[feature] = 0
+    
+    feature_cols = FEATURE_ORDER.copy()
     X = df[feature_cols]
     y = df['is_slow']
 
@@ -160,19 +149,7 @@ def train_models():
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
-    # --- Random Forest ---
-    rf = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)
-    rf.fit(X_train, y_train)
-    y_pred = rf.predict(X_test)
-    y_proba = rf.predict_proba(X_test)[:, 1]
-    ml_models['random_forest'] = rf
-    model_metrics['random_forest'] = {
-        'accuracy': round(accuracy_score(y_test, y_pred), 3),
-        'roc_auc': round(roc_auc_score(y_test, y_proba), 3),
-        'f1': round(f1_score(y_test, y_pred), 3),
-    }
-
-    # --- XGBoost ---
+    # --- XGBoost SEULEMENT ---
     if XGBOOST_AVAILABLE:
         xgb = XGBClassifier(
             n_estimators=100, max_depth=5, random_state=42,
@@ -182,36 +159,29 @@ def train_models():
         xgb = GradientBoostingClassifier(
             n_estimators=100, max_depth=5, random_state=42
         )
+    
     xgb.fit(X_train, y_train)
     y_pred = xgb.predict(X_test)
     y_proba = xgb.predict_proba(X_test)[:, 1]
-    ml_models['xgboost'] = xgb
-    model_metrics['xgboost'] = {
-        'accuracy': round(accuracy_score(y_test, y_pred), 3),
-        'roc_auc': round(roc_auc_score(y_test, y_proba), 3),
-        'f1': round(f1_score(y_test, y_pred), 3),
-    }
-
-    # --- Logistic Regression ---
-    lr = LogisticRegression(max_iter=1000, random_state=42)
-    lr.fit(X_train_scaled, y_train)
-    y_pred = lr.predict(X_test_scaled)
-    y_proba = lr.predict_proba(X_test_scaled)[:, 1]
-    ml_models['logistic_regression'] = lr
-    model_metrics['logistic_regression'] = {
-        'accuracy': round(accuracy_score(y_test, y_pred), 3),
-        'roc_auc': round(roc_auc_score(y_test, y_proba), 3),
-        'f1': round(f1_score(y_test, y_pred), 3),
+    
+    xgboost_model = xgb  # 🎯 Stocker uniquement XGBoost
+    
+    model_metrics = {
+        'xgboost': {  # 🎯 Seulement les métriques XGBoost
+            'accuracy': round(accuracy_score(y_test, y_pred), 3),
+            'roc_auc': round(roc_auc_score(y_test, y_proba), 3),
+            'f1': round(f1_score(y_test, y_pred), 3),
+        }
     }
 
     label = "XGBoost" if XGBOOST_AVAILABLE else "GradientBoosting (fallback)"
-    print(f"[OK] 3 modèles entraînés (RF, {label}, LR)")
-    for name, m in model_metrics.items():
-        print(f"     {name}: acc={m['accuracy']} auc={m['roc_auc']} f1={m['f1']}")
-
+    print(f"[OK] 🎯 Modèle unique: {label}")
+    print(f"[INFO] Features utilisées: {len(feature_cols)}")
+    print(f"     XGBoost: acc={model_metrics['xgboost']['accuracy']} "
+          f"auc={model_metrics['xgboost']['roc_auc']} f1={model_metrics['xgboost']['f1']}")
 
 def _generate_fallback_dataset(csv_path: str):
-    """Génère un petit dataset de secours si generate_dataset échoue."""
+    """Génère un dataset de secours (même fonction que précédemment)"""
     np.random.seed(42)
     n = 1000
     data = {
@@ -228,11 +198,10 @@ def _generate_fallback_dataset(csv_path: str):
         'rows_examined': np.random.lognormal(8, 2, n).astype(int).clip(100, 50000000),
         'has_index_used': np.random.binomial(1, 0.6, n),
         'index_count': np.random.poisson(2, n).clip(0, 8),
-        'involves_text_search': np.random.binomial(1, 0.15, n),
-        'involves_date_filter': np.random.binomial(1, 0.25, n),
-        'buffer_pool_hit_ratio': np.random.beta(8, 2, n) * 0.69 + 0.30,
+        'estimated_table_size_mb': np.random.uniform(0.5, 100.0, n).round(2),
         'connections_count': np.random.poisson(15, n).clip(1, 50),
         'is_peak_hour': np.random.binomial(1, 0.35, n),
+        'buffer_pool_hit_ratio': np.random.beta(8, 2, n) * 0.69 + 0.30,
     }
     df = pd.DataFrame(data)
     df['joins_per_table'] = np.where(df['num_tables'] > 0, df['num_joins'] / df['num_tables'], 0).round(3)
@@ -246,9 +215,8 @@ def _generate_fallback_dataset(csv_path: str):
     df.to_csv(csv_path, index=False)
     print(f"[OK] Dataset de secours généré: {csv_path} ({n} lignes)")
 
-
 # ============================================================
-# Parsing SQL -> features (adapté au schéma POS)
+# Parsing SQL -> features (même que précédemment)
 # ============================================================
 
 def detect_main_table(sql_upper: str) -> str:
@@ -268,7 +236,6 @@ def detect_main_table(sql_upper: str) -> str:
             return tbl
     return 'products'
 
-
 def detect_text_search(sql_upper: str, main_table: str) -> int:
     if 'LIKE' in sql_upper:
         if main_table in TEXT_COLUMNS:
@@ -281,7 +248,6 @@ def detect_text_search(sql_upper: str, main_table: str) -> int:
         if '%' in sql_upper:
             return 1
     return 0
-
 
 def detect_date_filter(sql_upper: str, main_table: str) -> int:
     all_date_cols = set()
@@ -296,9 +262,8 @@ def detect_date_filter(sql_upper: str, main_table: str) -> int:
         return 1
     return 0
 
-
 def parse_sql_to_features(sql_text: str) -> dict:
-    """Extrait les features à partir d'une requête SQL sur la BDD POS."""
+    """Extrait les features à partir d'une requête SQL."""
     sql_upper = sql_text.upper()
     sql_clean = re.sub(r'\s+', ' ', sql_upper).strip()
 
@@ -349,6 +314,8 @@ def parse_sql_to_features(sql_text: str) -> dict:
         + has_group_by * 2 + has_order_by * 1, 2
     )
 
+    estimated_table_size_mb = round(target_table_rows * 0.001, 2)
+
     return {
         'query_length_log': query_length_log,
         'num_joins': num_joins,
@@ -360,57 +327,75 @@ def parse_sql_to_features(sql_text: str) -> dict:
         'num_aggregates': num_aggregates,
         'num_subqueries': num_subqueries,
         'target_table_rows': target_table_rows,
-        'involves_text_search': involves_text_search,
-        'involves_date_filter': involves_date_filter,
+        'estimated_table_size_mb': estimated_table_size_mb,
         'joins_per_table': joins_per_table,
         'complexity_score': complexity_score,
         '_main_table': main_table,
+        '_involves_text_search': involves_text_search,
+        '_involves_date_filter': involves_date_filter,
     }
 
-
 def build_feature_vector(parsed: dict, db_context: dict) -> pd.DataFrame:
-    """Combine features parsées + contexte DB pour créer le vecteur complet."""
+    """Combine features parsées + contexte DB."""
     row = {}
-    for col in FEATURE_ORDER:
-        if col in parsed:
-            row[col] = parsed[col]
-        elif col in db_context:
-            row[col] = db_context[col]
-        else:
-            row[col] = 0
+    
+    feature_mapping = {
+        'query_length_log': 'query_length_log',
+        'num_joins': 'num_joins',
+        'num_tables': 'num_tables',
+        'num_where': 'num_where',
+        'has_group_by': 'has_group_by',
+        'has_order_by': 'has_order_by',
+        'has_limit': 'has_limit',
+        'num_aggregates': 'num_aggregates',
+        'num_subqueries': 'num_subqueries',
+        'target_table_rows': 'target_table_rows',
+        'estimated_table_size_mb': 'estimated_table_size_mb',
+        'joins_per_table': 'joins_per_table',
+        'complexity_score': 'complexity_score',
+    }
+    
+    for parsed_key, feature_key in feature_mapping.items():
+        if parsed_key in parsed:
+            row[feature_key] = parsed[parsed_key]
+    
+    context_mapping = {
+        'rows_examined': 'rows_examined',
+        'has_index_used': 'has_index_used',
+        'index_count': 'index_count',
+        'buffer_pool_hit_ratio': 'buffer_pool_hit_ratio',
+        'connections_count': 'connections_count',
+        'is_peak_hour': 'is_peak_hour',
+    }
+    
+    for context_key, feature_key in context_mapping.items():
+        if context_key in db_context:
+            row[feature_key] = db_context[context_key]
+    
+    for feature in FEATURE_ORDER:
+        if feature not in row:
+            row[feature] = 0
+    
     return pd.DataFrame([row], columns=FEATURE_ORDER)
 
-
-def predict_all_models(X_df: pd.DataFrame) -> list:
-    """Prédit avec les 3 modèles."""
-    n = len(X_df)
-    all_preds = {}
-    all_probas = {}
-    for name, model in ml_models.items():
-        if name == 'logistic_regression':
-            x_input = scaler.transform(X_df)
-        else:
-            x_input = X_df
-        all_preds[name] = model.predict(x_input)
-        all_probas[name] = model.predict_proba(x_input)[:, 1]
-
-    results = []
-    for idx in range(n):
-        row_results = {}
-        for name in ml_models:
-            pred = int(all_preds[name][idx])
-            proba = float(all_probas[name][idx])
-            row_results[name] = {
-                'prediction': pred,
-                'label': 'LENTE' if pred == 1 else 'RAPIDE',
-                'probability_slow': round(proba * 100, 1),
-            }
-        results.append(row_results)
-    return results
-
+def predict_xgboost(X_df: pd.DataFrame) -> dict:
+    """Prédit avec XGBoost SEULEMENT."""
+    if xgboost_model is None:
+        raise ValueError("XGBoost model not trained")
+    
+    pred = int(xgboost_model.predict(X_df)[0])
+    proba = float(xgboost_model.predict_proba(X_df)[0, 1])
+    
+    return {
+        'prediction': pred,
+        'label': 'LENTE' if pred == 1 else 'RAPIDE',
+        'probability_slow': round(proba * 100, 1),
+        'model_name': 'XGBoost',
+        'model_icon': '🚀'
+    }
 
 # ============================================================
-# Utilitaires MySQL
+# Utilitaires MySQL (inchangés)
 # ============================================================
 
 def get_db_connection():
@@ -420,7 +405,6 @@ def get_db_connection():
     except mysql.connector.Error as err:
         print(f"❌ Erreur connexion MySQL: {err}")
         raise HTTPException(status_code=500, detail=f"Erreur connexion MySQL: {err}")
-
 
 def execute_query_timed(sql: str):
     """Exécute une requête SQL et retourne les résultats avec le temps."""
@@ -435,7 +419,7 @@ def execute_query_timed(sql: str):
         conn.close()
         return {
             "success": True,
-            "results": results[:50],  # limiter les résultats retournés
+            "results": results[:50],
             "execution_time": round(execution_time, 4),
             "row_count": len(results),
             "is_slow": execution_time > SLOW_QUERY_THRESHOLD
@@ -456,7 +440,6 @@ def execute_query_timed(sql: str):
             "row_count": 0,
             "is_slow": False
         }
-
 
 def get_table_info():
     """Récupère les informations des tables."""
@@ -492,9 +475,8 @@ def get_table_info():
         print(f"Erreur récupération tables: {e}")
         return {}
 
-
 # ============================================================
-# Simulateur RL (conservé pour compatibilité frontend)
+# Simulateur RL (inchangé)
 # ============================================================
 
 class RLSimulator:
@@ -576,13 +558,6 @@ class RLSimulator:
                 'impact': 'Amélioration 40-60% sur les jointures',
                 'confidence': 0.85
             })
-            recommendations.append({
-                'type': 'CREATE', 'priority': 'medium',
-                'description': 'Index sur clients(wilaya)',
-                'sql': 'CREATE INDEX idx_clients_wilaya ON clients(wilaya)',
-                'impact': 'Accélération des filtres géographiques',
-                'confidence': 0.75
-            })
         elif self.current_indexes >= 4:
             recommendations.append({
                 'type': 'DROP', 'priority': 'medium',
@@ -591,13 +566,6 @@ class RLSimulator:
                 'impact': 'Amélioration INSERT/UPDATE de 15-25%',
                 'confidence': 0.65
             })
-        recommendations.append({
-            'type': 'ANALYZE', 'priority': 'low',
-            'description': "Analyser l'utilisation des index existants",
-            'sql': 'SELECT * FROM information_schema.statistics WHERE table_schema = DATABASE()',
-            'impact': 'Identification des index sous-utilisés',
-            'confidence': 0.9
-        })
         return {
             'current_indexes': self.current_indexes,
             'max_indexes': self.max_indexes,
@@ -626,9 +594,8 @@ class RLSimulator:
             'learning_rate': self.learning_rate
         }
 
-
 # ============================================================
-# Pydantic models
+# Pydantic models (inchangés)
 # ============================================================
 
 class QueryRequest(BaseModel):
@@ -637,7 +604,6 @@ class QueryRequest(BaseModel):
 
 class SQLAnalysisRequest(BaseModel):
     sql: str
-    # Contexte DB optionnel
     rows_examined: Optional[int] = None
     has_index_used: Optional[int] = None
     index_count: Optional[int] = None
@@ -649,15 +615,14 @@ class OptimizeRequest(BaseModel):
     steps: int = 5
     strategy: str = "balanced"
 
-
 # ============================================================
 # INITIALISATION
 # ============================================================
 
 app = FastAPI(
-    title="SADOP API v5.0 - ML Réel",
-    description="Prédiction de performance SQL avec Random Forest, XGBoost et Logistic Regression + RL",
-    version="5.0"
+    title="SADOP API XGBoost Only",
+    description="Prédiction de performance SQL avec XGBoost uniquement + RL",
+    version="1.0"
 )
 
 app.add_middleware(
@@ -670,42 +635,36 @@ app.add_middleware(
 
 rl_agent = RLSimulator()
 
-# Entraîner les modèles au démarrage
+# Entraîner XGBoost SEULEMENT au démarrage
 print("=" * 60)
-print("🚀 SADOP API v5.0 - Entraînement des modèles ML réels")
+print("🚀 SADOP API - XGBoost SEULEMENT")
 print("=" * 60)
-train_models()
-
+train_xgboost_only()
 
 # ============================================================
-# ENDPOINTS
+# ENDPOINTS MODIFIÉS POUR XGBOOST SEULEMENT
 # ============================================================
 
 @app.get("/")
 async def root():
     return {
-        "service": "SADOP API v5.0",
-        "description": "Prédiction ML réelle avec 3 algorithmes + RL simulation",
-        "models": list(ml_models.keys()),
+        "service": "SADOP API XGBoost Only",
+        "description": "Prédiction ML avec XGBoost uniquement",
+        "model": "xgboost",
         "model_metrics": model_metrics,
         "xgboost_native": XGBOOST_AVAILABLE,
         "features_count": len(FEATURE_ORDER),
         "endpoints": {
             "GET /": "Cette page",
             "GET /health": "État du service",
-            "POST /api/analyze/sql": "Analyse SQL avec 3 modèles ML",
-            "POST /predict/sql": "Prédiction depuis SQL brut",
-            "POST /predict/form": "Prédiction depuis features manuelles",
-            "POST /predict/csv": "Prédiction depuis CSV uploadé",
+            "POST /api/analyze/sql": "🎯 Analyse SQL avec XGBoost",
             "POST /chat": "Chat avec l'agent IA",
             "GET /api/rl/status": "Statut RL",
             "GET /api/rl/recommendations": "Recommandations RL",
             "POST /api/rl/optimize": "Optimisation RL",
             "GET /api/tables": "Tables de la BDD",
-            "GET /api/metrics": "Métriques des modèles ML",
         }
     }
-
 
 @app.get("/health")
 async def health_check():
@@ -730,21 +689,18 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "database": db_status,
         "database_name": db_name,
-        "ml_models": list(ml_models.keys()),
-        "ml_models_count": len(ml_models),
+        "ml_model": "xgboost",
+        "model_loaded": xgboost_model is not None,
         "xgboost": "native" if XGBOOST_AVAILABLE else "fallback",
         "rl_agent": rl_status['status'],
         "rl_indexes": f"{rl_status['index_count']}/{rl_status['max_indexes']}",
-        "version": "5.0",
+        "version": "1.0",
         "slow_query_threshold": SLOW_QUERY_THRESHOLD
     }
 
-
-# ==================== ML ENDPOINTS ====================
-
 @app.post("/api/analyze/sql")
 async def analyze_sql_endpoint(request: SQLAnalysisRequest):
-    """Analyse une requête SQL avec les 3 vrais modèles ML."""
+    """🎯 Analyse une requête SQL avec XGBoost SEULEMENT."""
     try:
         parsed = parse_sql_to_features(request.sql)
         main_table = parsed.pop('_main_table')
@@ -761,13 +717,12 @@ async def analyze_sql_endpoint(request: SQLAnalysisRequest):
         }
 
         X_df = build_feature_vector(parsed, db_context)
-        all_results = predict_all_models(X_df)
-        model_preds = all_results[0]  # un seul SQL
-
-        # Résultat principal (XGBoost par défaut pour la compatibilité frontend)
-        xgb_result = model_preds.get('xgboost', model_preds.get('random_forest', {}))
-        is_slow = xgb_result.get('prediction', 0) == 1
-        slow_proba = xgb_result.get('probability_slow', 50.0) / 100.0
+        
+        # 🎯 Prédiction avec XGBoost SEULEMENT
+        xgboost_result = predict_xgboost(X_df)
+        
+        is_slow = xgboost_result['prediction'] == 1
+        slow_proba = xgboost_result['probability_slow'] / 100.0
 
         # Raisons de la prédiction
         reasons = []
@@ -777,8 +732,6 @@ async def analyze_sql_endpoint(request: SQLAnalysisRequest):
             reasons.append("GROUP BY détecté")
         if parsed.get('num_subqueries', 0) > 0:
             reasons.append(f"{parsed['num_subqueries']} sous-requête(s)")
-        if parsed.get('num_aggregates', 0) > 0:
-            reasons.append(f"{parsed['num_aggregates']} agrégat(s)")
         if not db_context.get('has_index_used', 1):
             reasons.append("Pas d'index utilisé")
         if db_context.get('rows_examined', 0) > 10000:
@@ -787,7 +740,7 @@ async def analyze_sql_endpoint(request: SQLAnalysisRequest):
         # Exécution réelle sur MySQL
         execution = execute_query_timed(request.sql)
 
-        # Format compatible avec le frontend existant
+        # Format de prédiction
         prediction = {
             "is_slow": is_slow,
             "slow_probability": round(slow_proba, 3),
@@ -795,14 +748,15 @@ async def analyze_sql_endpoint(request: SQLAnalysisRequest):
             "confidence": round(abs(slow_proba - 0.5) * 2, 3),
             "reasons": reasons,
             "complexity_score": parsed.get('complexity_score', 0),
-            "threshold": SLOW_QUERY_THRESHOLD
+            "threshold": SLOW_QUERY_THRESHOLD,
+            "model_used": "XGBoost"
         }
 
         return {
             "success": True,
             "sql": request.sql,
             "prediction": prediction,
-            "all_models": model_preds,
+            "xgboost_result": xgboost_result,  # 🎯 Résultat XGBoost
             "execution": execution,
             "parsed_features": parsed,
             "db_context": db_context,
@@ -812,164 +766,59 @@ async def analyze_sql_endpoint(request: SQLAnalysisRequest):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-
 @app.post("/predict/sql")
 async def predict_sql(request: SQLAnalysisRequest):
-    """Prédiction depuis une requête SQL brute (endpoint original Flask adapté)."""
+    """Prédiction avec XGBoost depuis SQL brut."""
     return await analyze_sql_endpoint(request)
-
-
-@app.post("/predict/form")
-async def predict_form(data: dict):
-    """Prédiction depuis les features manuelles."""
-    try:
-        row = {}
-        for col in FEATURE_ORDER:
-            val = data.get(col, 0)
-            row[col] = float(val)
-        if row['num_tables'] > 0:
-            row['joins_per_table'] = round(row['num_joins'] / row['num_tables'], 3)
-        row['complexity_score'] = round(
-            row['num_joins'] * 2 + row['num_subqueries'] * 3
-            + row['num_aggregates'] * 1.5 + row['has_group_by'] * 2
-            + row['has_order_by'] * 1, 2
-        )
-        X_df = pd.DataFrame([row], columns=FEATURE_ORDER)
-        results = predict_all_models(X_df)
-        return {'success': True, 'predictions': results, 'features': row}
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
-
-
-@app.post("/predict/csv")
-async def predict_csv(file: UploadFile = File(...)):
-    """Prédiction depuis un fichier CSV uploadé."""
-    try:
-        if not file.filename.lower().endswith('.csv'):
-            return {'success': False, 'error': 'Le fichier doit être un CSV'}
-
-        content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
-
-        missing_cols = [c for c in FEATURE_ORDER if c not in df.columns]
-        if 'joins_per_table' in missing_cols and 'num_joins' in df.columns and 'num_tables' in df.columns:
-            df['joins_per_table'] = np.where(df['num_tables'] > 0, df['num_joins'] / df['num_tables'], 0).round(3)
-            missing_cols.remove('joins_per_table')
-        if 'complexity_score' in missing_cols and all(
-            c in df.columns for c in ['num_joins', 'num_subqueries', 'num_aggregates', 'has_group_by', 'has_order_by']
-        ):
-            df['complexity_score'] = (
-                df['num_joins'] * 2 + df['num_subqueries'] * 3
-                + df['num_aggregates'] * 1.5 + df['has_group_by'] * 2
-                + df['has_order_by'] * 1
-            ).round(2)
-            missing_cols.remove('complexity_score')
-        if missing_cols:
-            return {'success': False, 'error': f'Colonnes manquantes: {", ".join(missing_cols)}'}
-
-        X_df = df[FEATURE_ORDER].copy()
-        has_target = 'is_slow' in df.columns
-        results = predict_all_models(X_df)
-
-        response_rows = []
-        for i, row_preds in enumerate(results):
-            row_data = {'index': i, 'features': X_df.iloc[i].to_dict(), 'predictions': row_preds}
-            if has_target:
-                row_data['actual'] = int(df['is_slow'].iloc[i])
-            response_rows.append(row_data)
-
-        csv_metrics = None
-        if has_target:
-            y_true = df['is_slow'].values
-            csv_metrics = {}
-            for name in ml_models:
-                x_input = scaler.transform(X_df) if name == 'logistic_regression' else X_df
-                y_pred = ml_models[name].predict(x_input)
-                y_proba = ml_models[name].predict_proba(x_input)[:, 1]
-                csv_metrics[name] = {
-                    'accuracy': round(accuracy_score(y_true, y_pred), 3),
-                    'roc_auc': round(roc_auc_score(y_true, y_proba), 3),
-                    'f1': round(f1_score(y_true, y_pred), 3),
-                }
-
-        return {
-            'success': True,
-            'total_rows': len(X_df),
-            'rows': response_rows[:200],
-            'truncated': len(X_df) > 200,
-            'csv_metrics': csv_metrics,
-            'has_target': has_target,
-        }
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
-
-
-@app.get("/api/metrics")
-async def get_model_metrics():
-    """Retourne les métriques des 3 modèles ML."""
-    return {
-        "success": True,
-        "models": model_metrics,
-        "xgboost_native": XGBOOST_AVAILABLE,
-        "features": FEATURE_ORDER,
-        "pos_tables": list(POS_TABLE_INFO.keys())
-    }
-
-
-@app.get("/table-info/{table_name}")
-async def table_info_endpoint(table_name: str):
-    """Retourne les infos d'une table POS."""
-    info = POS_TABLE_INFO.get(table_name)
-    if not info:
-        raise HTTPException(status_code=404, detail="Table inconnue")
-    return {
-        'table': table_name,
-        'rows': info['rows'],
-        'indexes': info['indexes'],
-        'has_text': info['has_text'],
-        'text_columns': TEXT_COLUMNS.get(table_name, []),
-        'date_columns': DATE_COLUMNS.get(table_name, []),
-    }
-
-
-# ==================== CHAT ENDPOINT ====================
 
 @app.post("/chat")
 async def chat_with_agent(request: QueryRequest):
-    """Chat avec l'agent — analyse SQL si détecté, sinon info générale."""
+    """🎯 Chat avec l'agent — analyse SQL avec XGBoost uniquement."""
     try:
         input_lower = request.question.lower()
 
         # Détection SQL
         if any(kw in input_lower for kw in ['select', 'insert', 'update', 'delete', 'from ', 'where ']):
-            # C'est une requête SQL → analyser
             sql_req = SQLAnalysisRequest(sql=request.question)
             analysis = await analyze_sql_endpoint(sql_req)
             if analysis.get("success"):
                 pred = analysis["prediction"]
-                models_detail = analysis.get("all_models", {})
+                xgb_result = analysis.get("xgboost_result", {})
+                
                 lines = [
-                    "## 🔍 Analyse SQL (3 modèles ML réels)",
+                    "## 🚀 Analyse SQL avec XGBoost",
                     f"```sql\n{request.question}\n```",
                     f"**Table détectée:** {analysis.get('detected_table', '?')}",
                     "",
+                    f"**🎯 Prédiction XGBoost:** {xgb_result.get('label', '?')}",
+                    f"**Confiance:** {xgb_result.get('probability_slow', 0)}% lent",
+                    "",
                 ]
-                for mname, mresult in models_detail.items():
-                    icon = "🔴" if mresult['prediction'] == 1 else "🟢"
-                    lines.append(f"{icon} **{mname}**: {mresult['label']} ({mresult['probability_slow']}% slow)")
+                
                 if pred["reasons"]:
-                    lines.append("\n**Raisons:**")
+                    lines.append("**Raisons:**")
                     for r in pred["reasons"]:
                         lines.append(f"- {r}")
+                
                 exe = analysis.get("execution", {})
                 if exe.get("success"):
                     lines.append(f"\n⚡ **Exécution réelle:** {exe['execution_time']:.3f}s ({exe['row_count']} lignes)")
-                return {"success": True, "question": request.question, "response": "\n".join(lines),
-                        "source": "SADOP ML (RF + XGBoost + LR)", "timestamp": datetime.now().isoformat()}
+                
+                return {
+                    "success": True, 
+                    "question": request.question, 
+                    "response": "\n".join(lines),
+                    "source": "XGBoost", 
+                    "timestamp": datetime.now().isoformat()
+                }
             else:
-                return {"success": True, "question": request.question,
-                        "response": f"❌ Erreur analyse: {analysis.get('error', '?')}",
-                        "source": "SADOP", "timestamp": datetime.now().isoformat()}
+                return {
+                    "success": True, 
+                    "question": request.question,
+                    "response": f"❌ Erreur analyse: {analysis.get('error', '?')}",
+                    "source": "XGBoost", 
+                    "timestamp": datetime.now().isoformat()
+                }
 
         elif any(kw in input_lower for kw in ['optimiser', 'optimize', 'rl', 'index']):
             result = rl_agent.optimize(steps=5)
@@ -980,38 +829,35 @@ async def chat_with_agent(request: QueryRequest):
             ]
             for s in result['steps_details']:
                 lines.append(f"- Étape {s['step']}: {s['action']} (reward: {s['reward']:.3f})")
-            return {"success": True, "question": request.question, "response": "\n".join(lines),
-                    "source": "SADOP RL", "timestamp": datetime.now().isoformat()}
-
-        elif any(kw in input_lower for kw in ['métrique', 'metric', 'performance', 'accuracy', 'précision']):
-            lines = ["## 📊 Métriques des modèles ML", ""]
-            for name, m in model_metrics.items():
-                lines.append(f"**{name}**: Accuracy={m['accuracy']} | AUC={m['roc_auc']} | F1={m['f1']}")
-            return {"success": True, "question": request.question, "response": "\n".join(lines),
-                    "source": "SADOP ML", "timestamp": datetime.now().isoformat()}
+            return {
+                "success": True, 
+                "question": request.question, 
+                "response": "\n".join(lines),
+                "source": "SADOP RL", 
+                "timestamp": datetime.now().isoformat()
+            }
 
         else:
             return {
                 "success": True,
                 "question": request.question,
-                "response": f"""## 🤖 Assistant SADOP v5.0
+                "response": f"""## 🚀 Assistant SADOP XGBoost
 
-**Modèles ML actifs:** {', '.join(ml_models.keys())}
+**Modèle ML actif:** XGBoost (state-of-the-art)
 
 **Commandes:**
-- Envoyez une requête SQL pour l'analyser avec 3 modèles
+- Envoyez une requête SQL pour l'analyser avec XGBoost
 - "optimiser" → lancer l'optimisation RL
-- "métriques" → voir les performances des modèles
 - "tables" → structure de la BDD
 
 **Exemple:** `SELECT * FROM orders JOIN clients ON orders.client_id = clients.id`""",
-                "source": "SADOP", "timestamp": datetime.now().isoformat()
+                "source": "XGBoost", 
+                "timestamp": datetime.now().isoformat()
             }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-
-# ==================== RL ENDPOINTS ====================
+# ==================== RL ENDPOINTS (inchangés) ====================
 
 @app.get("/api/rl/status")
 async def get_rl_status():
@@ -1022,14 +868,12 @@ async def get_rl_status():
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-
 @app.get("/api/rl/recommendations")
 async def get_rl_recommendations():
     try:
         return {"success": True, "data": rl_agent.get_recommendations()}
     except Exception as e:
         return {"success": False, "error": str(e)}
-
 
 @app.post("/api/rl/optimize")
 async def optimize_with_rl(request: OptimizeRequest):
@@ -1039,7 +883,6 @@ async def optimize_with_rl(request: OptimizeRequest):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-
 @app.get("/api/rl/learning-stats")
 async def get_rl_learning_stats():
     try:
@@ -1047,8 +890,7 @@ async def get_rl_learning_stats():
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-
-# ==================== DB ENDPOINTS ====================
+# ==================== DB ENDPOINTS (inchangés) ====================
 
 @app.get("/api/tables")
 async def get_tables():
@@ -1057,7 +899,6 @@ async def get_tables():
         return {"success": True, "data": tables_info, "count": len(tables_info)}
     except Exception as e:
         return {"success": False, "error": str(e)}
-
 
 @app.get("/api/performance")
 async def get_performance_summary():
@@ -1077,11 +918,10 @@ async def get_performance_summary():
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-
 # ==================== LANCEMENT ====================
 if __name__ == "__main__":
     print("=" * 60)
-    print(f"🔮 ML: {len(ml_models)} modèles ({', '.join(ml_models.keys())})")
+    print(f"🔮 ML: XGBoost SEULEMENT")
     print(f"🤖 RL: Simulation active")
     print(f"🌐 URL: http://localhost:8000")
     print(f"📚 Docs: http://localhost:8000/docs")

@@ -4,7 +4,14 @@ WORKDIR /app
 
 # Installer les dépendances Python
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install \
+    --upgrade pip setuptools wheel && \
+    pip install \
+    --prefer-binary \
+    --default-timeout=300 \
+    --no-cache-dir \
+    -r requirements.txt
+
 
 # Copier le code
 COPY . .
