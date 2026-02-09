@@ -67,7 +67,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <h1>🚀 SADOP - Système Autonome de Diagnostic et d'Optimisation</h1>
-    <p><strong>🌲 Random Forest + 🚀 XGBoost + 📐 Logistic Regression + 🤖 RL</strong></p>
+    <p><strong> 🚀 XGBoost  + 🤖 RL</strong></p>
     <p style="opacity: 0.8;">Système complet d'optimisation de bases de données MySQL</p>
 </div>
 """, unsafe_allow_html=True)
@@ -223,7 +223,7 @@ if page == "🏠 Tableau de bord":
                 else:
                     raise Exception("API non ready")
         except:
-            labels = ['Random Forest', 'XGBoost', 'Logistic Regression']
+            labels = ['XGBoost']
             values = [0.85, 0.87, 0.80]
             fig = px.bar(x=labels, y=values,
                         title="F1-Score des modèles (en attente API)",
@@ -305,7 +305,7 @@ elif page == "💬 Assistant IA":
                 with st.spinner("🤖 L'agent SADOP analyse..."):
                     try:
                         response = requests.post(
-                            f"{api_url}/chat",
+                            f"{api_url}/chat",  # ✅ CORRECT
                             json={"question": prompt, "user_id": "streamlit_user"},
                             timeout=30
                         )
@@ -348,7 +348,7 @@ elif page == "💬 Assistant IA":
             st.rerun()
 
 elif page == "🔍 Analyse XGBoost":
-    st.header("🔍 Analyse ML (Random Forest + XGBoost + Logistic Regression)")
+    st.header("🔍 Analyse ML ( XGBoost )")
     
     tab1, tab2, tab3 = st.tabs(["📝 Analyse", "📈 Statistiques", "📋 Historique"])
     
@@ -385,11 +385,10 @@ elif page == "🔍 Analyse XGBoost":
                 with st.spinner("Analyse avec RF + XGBoost + LR..."):
                     try:
                         response = requests.post(
-                            f"{api_url}/api/analyze/sql",
+                            f"{api_url}/api/analyze/sql",  # ✅ CORRECT
                             json={"sql": sql_input},
                             timeout=30
                         )
-                        
                         if response.status_code == 200:
                             data = response.json()
                             
@@ -417,9 +416,7 @@ elif page == "🔍 Analyse XGBoost":
                                 if all_models:
                                     model_cols = st.columns(len(all_models))
                                     model_names_display = {
-                                        'random_forest': '🌲 Random Forest',
                                         'xgboost': '🚀 XGBoost',
-                                        'logistic_regression': '📐 Logistic Regression'
                                     }
                                     for i, (mname, mresult) in enumerate(all_models.items()):
                                         with model_cols[i]:
@@ -543,7 +540,7 @@ elif page == "🔍 Analyse XGBoost":
                         'Valeur': accuracies + aucs + f1s
                     })
                     fig = px.bar(metrics_df, x='Modèle', y='Valeur', color='Métrique',
-                                barmode='group', title='Performance des 3 modèles ML',
+                                barmode='group', title='Performance de modèles ML',
                                 color_discrete_sequence=['#667eea', '#f5576c', '#00f2fe'])
                     fig.update_layout(yaxis_range=[0, 1])
                     st.plotly_chart(fig, use_container_width=True)
@@ -603,10 +600,11 @@ elif page == "🤖 Optimisation RL":
             with st.spinner("L'agent RL apprend et optimise..."):
                 try:
                     response = requests.post(
-                        f"{api_url}/api/rl/optimize",
+                        f"{api_url}/api/rl/optimize",  # ✅ CORRECT
                         json={"steps": steps, "strategy": strategy},
                         timeout=60
                     )
+
                     
                     if response.status_code == 200:
                         data = response.json()
